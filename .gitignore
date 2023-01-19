@@ -1,0 +1,8 @@
+# python gitignore
+.venv
+*.pyc
+__pycache__
+*.egg-info
+*.egg
+*.lock
+.pdm.toml
