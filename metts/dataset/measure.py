@@ -2,9 +2,10 @@ from abc import ABC, abstractmethod
 import os
 
 import numpy as np
+import pyworld as pw
+from srmrpy import SRMR
 
-if os.environ.get("METTS_NO_MEASURES", False):
-    from .snr import SNR
+from .snr import SNR
 
 class Measure(ABC):
     def __init__(self, name, description):
@@ -52,7 +53,6 @@ class PitchMeasure(Measure):
     ):
         global pw
         super().__init__(name, description)
-        import pyworld as pw
         self.sampling_rate = sampling_rate
         self.hop_length = hop_length
         self.dio_speed = int(np.round(1 / pitch_quality))
@@ -106,7 +106,6 @@ class SRMRMeasure(Measure):
         sampling_rate=22050,
     ):
         super().__init__(name, description)
-        from srmrpy import SRMR
         self.srmr = SRMR(fs=sampling_rate, faster=True, norm=True)
 
     def compute(self, audio, durations, silence_mask=None):

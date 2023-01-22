@@ -13,11 +13,10 @@ from metts.dataset.plotting import plot_batch
 if __name__ == "__main__":
     lco.init("config/config.yaml")
     dataset = load_dataset("metts/dataset/dataset.py", "libritts")
-    dev_ds = dataset["dev"]
+    dev_ds = dataset["train"]
     speaker2idx = json.load(open("data/speaker2idx.json"))
     phone2idx = json.load(open("data/phone2idx.json"))
     collator = MeTTSCollator(
-        sampling_rate=22050,
         speaker2idx=speaker2idx,
         phone2idx=phone2idx,
         measures=[
@@ -32,8 +31,9 @@ if __name__ == "__main__":
         num_workers=0,
     )
     for batch in dev:
+        print(batch)
         # print("audio, frame, phone")
         # print(collator.max_audio_length, collator.max_frame_length, collator.max_phone_length)
-        fig = plot_batch(batch)
-        plt.savefig("test_audio.png")
+        #fig = plot_batch(batch)
+        #plt.savefig("test_audio.png")
         break

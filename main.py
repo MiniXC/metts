@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import json
 
 from metts.dataset.data_collator import MeTTSCollator
 from metts.dataset.dummy import DummyDataset
@@ -7,20 +8,35 @@ from metts.dataset.measure import PitchMeasure, EnergyMeasure, SRMRMeasure, SNRM
 import lco
 from transformers.trainer import Trainer, TrainingArguments
 from transformers import HfArgumentParser
-
-@dataclass
-class Args:
-    load_data: bool = False
+from datasets import load_dataset
 
 def main(index):
-    (args, training_args,) = HfArgumentParser([Args, TrainingArguments]).parse_json_file("config/trainer.json")
+    training_args = HfArgumentParser(TrainingArguments).parse_json_file("config/trainer.json")[0]
 
-    print(f"Hello TPU core {index}! {args}")
-    dataset = DummyDataset()
+    print(f"Hello TPU core {index}!")
+    #dataset = DummyDataset()
+    dataset = load_dataset("metts/dataset/dataset.py", "libritts")
+    train = dataset["train"]
+    dev = dataset["dev"]
+    speaker2idx = json.load(open("data/speaker2idx.json"))
+    phone2idx = json.load(open("data/phone2idx.json"))
+    collator = MeTTSCollator(
+        speaker2idx=speaker2idx,
+        phone2idx=phone2idx,
+        measures=[
+            PitchMeasure(),
+        ],
+    )
 
     model = MeTTS()
 
-    trainer = Trainer(model, training_args, train_dataset=dataset, eval_dataset=dataset)
+    trainer = Trainer(
+        model,
+        training_args,
+        train_dataset=train,
+        eval_dataset=dev,
+        data_collator=collator.collate_fn,
+    )
     trainer.train()
 
 def _mp_fn(index):

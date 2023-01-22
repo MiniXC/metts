@@ -6,4 +6,11 @@ audio:
   n_mels: 80
 max_lengths:
   phone: 450
-  frame: 450
+  frame: 600
+diffusion_vocoder:
+  T: 200
+  beta_0: 0.0001
+  beta_T: 0.02
+  step_embed_dim_in: 128
+  step_embed_dim_out: 512
+  step_embed_dim_hidden: 512
