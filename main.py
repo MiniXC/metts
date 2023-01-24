@@ -3,7 +3,7 @@ import json
 
 from metts.dataset.data_collator import MeTTSCollator
 from metts.dataset.dummy import DummyDataset
-from metts.tts.model import MeTTS
+from metts.tts.model import MeTTS, MeTTSConfig
 from metts.dataset.measure import PitchMeasure, EnergyMeasure, SRMRMeasure, SNRMeasure
 import lco
 from transformers.trainer import Trainer, TrainingArguments
@@ -28,7 +28,7 @@ def main(index):
         ],
     )
 
-    model = MeTTS()
+    model = MeTTS(MeTTSConfig())
 
     trainer = Trainer(
         model,

@@ -136,7 +136,7 @@ class MeTTSCollator():
         if self.pad_to_max_length:
             max_frame_length = max(self.max_frame_length, max_frame_length)
             max_phone_length = max(self.max_phone_length, max_phone_length)
-        max_audio_length = (max_frame_length * lco["audio"]["hop_length"]) - 1
+        max_audio_length = (max_frame_length * lco["audio"]["hop_length"])
         batch[0]["audio"]["array"] = ConstantPad1d(
             (0, max_audio_length - len(batch[0]["audio"]["array"])), 0
         )(torch.tensor(batch[0]["audio"]["array"]))
@@ -178,6 +178,19 @@ class MeTTSCollator():
         result["measures"] = {}
         result["measure_means"] = {}
         result["measure_stds"] = {}
+
+        MAX_FRAMES = lco["max_lengths"]["frame"]
+        BATCH_SIZE = len(batch)
+        result["val_ind"] = (torch.zeros((MAX_FRAMES, BATCH_SIZE), dtype=torch.int64)
+            .scatter(
+                0,
+                result["phone_durations"].cumsum(-1).T,
+                torch.ones(MAX_FRAMES, BATCH_SIZE, dtype=torch.int64)
+            )
+            .T.cumsum(-1)
+        )
+
+
         for measure in self.measures:
             result["measures"][measure.name] = pad_sequence([x["measures"][measure.name]["array"] for x in batch], batch_first=True)
             result["measure_means"][measure.name] = torch.tensor([x["measures"][measure.name]["mean"] for x in batch])
