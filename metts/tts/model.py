@@ -34,6 +34,10 @@ class MeTTS(PreTrainedModel):
             hop_length=lco["audio"]["hop_length"],
             n_mels=lco["audio"]["n_mels"],
             pad_mode="constant",
+            power=1,
+            htk=True,
+            fmin=0,
+            fmax=8000,
             # trainable_mel=True,
             # trainable_STFT=True,
         )
@@ -43,32 +47,30 @@ class MeTTS(PreTrainedModel):
                 100, 256, padding_idx=0
         )
         self.encoder = TransformerEncoder(
-            # ConformerLayer(
-            #     256,
-            #     2,
-            #     conv_in=256,
-            #     conv_filter_size=1024,
-            #     conv_kernel=(9, 1),
-            #     batch_first=True,
-            #     dropout=0.1,
-            #     conv_depthwise=False,
-            # ),
-            TransformerEncoderLayer(256, 2, 256),
+            ConformerLayer(
+                256,
+                2,
+                conv_in=256,
+                conv_filter_size=1024,
+                conv_kernel=(9, 1),
+                batch_first=True,
+                dropout=0.1,
+                conv_depthwise=True,
+            ),
             num_layers=4,
         )
         self.lr = LengthRegulator()
         self.decoder = TransformerEncoder(
-            # ConformerLayer(
-            #     256,
-            #     2,
-            #     conv_in=256,
-            #     conv_filter_size=1024,
-            #     conv_kernel=(9, 1),
-            #     batch_first=True,
-            #     dropout=0.1,
-            #     conv_depthwise=False,
-            # ),
-            TransformerEncoderLayer(256, 2, 256),
+            ConformerLayer(
+                256,
+                2,
+                conv_in=256,
+                conv_filter_size=1024,
+                conv_kernel=(9, 1),
+                batch_first=True,
+                dropout=0.1,
+                conv_depthwise=True,
+            ),
             num_layers=4,
             return_additional_layer=2,
         )
@@ -82,6 +84,14 @@ class MeTTS(PreTrainedModel):
             lco["diffusion_vocoder"]["T"]
         )
         self.diff_params = DiffWave.compute_diffusion_params(noise_schedule)
+
+    @staticmethod
+    def drc(x, C=1, clip_val=1e-1, log10=True):
+        """Dynamic Range Compression"""
+        if log10:
+            return torch.log10(torch.clamp(x, min=clip_val) * C)
+        else:
+            return torch.log(torch.clamp(x, min=clip_val) * C)
 
     def forward(self, phones, phone_durations, audio, val_ind, **measures):
         ### Transformer TTS
@@ -98,12 +108,17 @@ class MeTTS(PreTrainedModel):
         mel = self.mel(audio).view(batch_size, lco["audio"]["n_mels"], -1)
         mel = nn.ConstantPad2d((0, x.shape[-2] - mel.shape[-1], 0, 0), 0)(mel)
         mask = mask.unsqueeze(-1)
-        disc_loss = nn.MSELoss()(x, mel.view(batch_size, -1, lco["audio"]["n_mels"]))
+        mel = MeTTS.drc(mel)
+        mel = mel.view(batch_size, -1, lco["audio"]["n_mels"])
+        disc_loss = nn.MSELoss()(x, mel)
 
         ### Diffusion Vocoder
         hidden = self.hidden_linear(hidden)
         hidden = hidden[:, :lco["max_lengths"]["vocoder"], :]
         hidden = hidden.view(batch_size, 80, -1)
+        mel = mel[:, :lco["max_lengths"]["vocoder"], :]
+        mel = mel.view(batch_size, 80, -1)
+        hidden = hidden + mel
         audio = audio[:, :lco["max_lengths"]["vocoder"]*256]
         ts = torch.randint(low=0, high=lco["diffusion_vocoder"]["T"], size=(batch_size, 1)).to(x.device)
         noise_scales = self.diff_params["alpha"].to(x.device)[ts]
@@ -114,5 +129,5 @@ class MeTTS(PreTrainedModel):
 
         return {
             "logits": x,
-            "loss": disc_loss,
+            "loss": disc_loss + theta_loss,
         }

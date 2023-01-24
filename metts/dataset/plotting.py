@@ -66,7 +66,7 @@ def plot_item(item, id2phone):
         power=2,
     )
     audio = torch.from_numpy(item["audio"]["array"])
-    mel = np.log(mel(audio))
+    mel = drc(mel(audio))
     fig = plt.figure(figsize=(20, 10))
 
     audio_len = len(audio) / lco["audio"]["sampling_rate"]

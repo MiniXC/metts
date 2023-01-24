@@ -6,3 +6,5 @@ __pycache__
 *.egg
 *.lock
 .pdm.toml
+output
+wandb
