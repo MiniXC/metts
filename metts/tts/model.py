@@ -93,11 +93,21 @@ class MeTTS(PreTrainedModel):
         else:
             return torch.log(torch.clamp(x, min=clip_val) * C)
 
-    def forward(self, phones, phone_durations, audio, val_ind, **measures):
+   
+
+    def forward(self, phones, phone_durations, audio, val_ind, **kwargs):
         ### Transformer TTS
-        x = phones
+        tts = self.tts_fwd(phones, phone_durations, audio, val_ind)
+
+        ### Diffusion Vocoder
+        vocoder = self.vocoder_fwd(tts["mel"], tts["hidden"], audio)
+
+        return {
+            "loss": tts["loss"] + vocoder["loss"],
+        }
+
+    def tts_fwd(self, x, durations, audio, val_ind):
         batch_size = x.shape[0]
-        durations = phone_durations
         x = self.embedding(x)
         x = self.positional_encoding(x)
         x = self.encoder(x)
@@ -110,24 +120,32 @@ class MeTTS(PreTrainedModel):
         mask = mask.unsqueeze(-1)
         mel = MeTTS.drc(mel)
         mel = mel.view(batch_size, -1, lco["audio"]["n_mels"])
-        disc_loss = nn.MSELoss()(x, mel)
-
-        ### Diffusion Vocoder
-        hidden = self.hidden_linear(hidden)
-        hidden = hidden[:, :lco["max_lengths"]["vocoder"], :]
-        hidden = hidden.view(batch_size, 80, -1)
-        mel = mel[:, :lco["max_lengths"]["vocoder"], :]
-        mel = mel.view(batch_size, 80, -1)
-        hidden = hidden + mel
-        audio = audio[:, :lco["max_lengths"]["vocoder"]*256]
-        ts = torch.randint(low=0, high=lco["diffusion_vocoder"]["T"], size=(batch_size, 1)).to(x.device)
-        noise_scales = self.diff_params["alpha"].to(x.device)[ts]
-        z = torch.normal(0, 1, size=audio.shape).to(x.device)
-        noisy_audios = noise_scales * audio + (1 - noise_scales**2.).sqrt() * z
-        e = self.diffusion_vocoder(noisy_audios, hidden, ts)
-        theta_loss = nn.L1Loss()(e, z)
+        loss = nn.MSELoss()(x, mel)
 
         return {
-            "logits": x,
-            "loss": disc_loss + theta_loss,
+            "loss": loss,
+            "hidden": hidden,
+            "mel": mel,
+        }
+
+    def vocoder_fwd(self, mel, hidden, audio):
+        batch_size = mel.shape[0]
+        max_len = lco["max_lengths"]["vocoder"]
+        hidden = self.hidden_linear(hidden)
+        hidden = hidden[:, :max_len]
+        hidden = hidden.view(batch_size, 80, -1)
+        mel = mel[:, :max_len]
+        mel = mel.view(batch_size, 80, -1)
+        hidden = hidden + mel
+        audio = audio[:, :max_len*256]
+        ts = torch.randint(low=0, high=lco["diffusion_vocoder"]["T"], size=(batch_size, 1))
+        noise_scales = self.diff_params["alpha"].to(mel.device)[ts]
+        z = torch.normal(0, 1, size=audio.shape).to(mel.device)
+        noisy_audios = noise_scales * audio + (1 - noise_scales**2.).sqrt() * z
+        e = self.diffusion_vocoder(noisy_audios, hidden, ts.to(mel.device))
+        loss = nn.L1Loss()(e, z)
+
+        return {
+            "loss": loss,
+            "logits": e,
         }

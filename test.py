@@ -1,6 +1,7 @@
 import json
 import multiprocessing
 
+from tqdm.auto import tqdm
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 from matplotlib import pyplot as plt
@@ -26,14 +27,16 @@ if __name__ == "__main__":
     dev = DataLoader(
         dataset=dev_ds,
         batch_size=8,
-        shuffle=False,
+        shuffle=True,
         collate_fn=collator.collate_fn,
         num_workers=0,
     )
-    for batch in dev:
-        print(batch)
+    for i, batch in tqdm(enumerate(dev)):
+        #print(batch)
         # print("audio, frame, phone")
         # print(collator.max_audio_length, collator.max_frame_length, collator.max_phone_length)
         #fig = plot_batch(batch)
         #plt.savefig("test_audio.png")
-        break
+        if i >= 100:
+            print(collator.num_masked/collator.num_total, collator.percentage_mask_tokens/collator.num_total)
+            break

@@ -52,6 +52,10 @@ class MeTTSCollator():
         self.pad_to_multiple_of = pad_to_multiple_of
         self.wav2mel = JitWrapper("data/wav2mel.pt")
         self.dvector = JitWrapper("data/dvector.pt")
+
+        self.num_masked = 0
+        self.num_total = 0
+        self.percentage_mask_tokens = 0
         
     def _expand(self, values, durations):
         out = []
@@ -94,6 +98,9 @@ class MeTTSCollator():
             duration_mask_rm = duration_mask_rm[np.argsort(duration_permutation)]
             batch[i]["phones"][duration_mask_rm] = self.phone2idx["MASK"]
             duration_mask_rm_exp = np.repeat(duration_mask_rm, durations * 256)
+            self.num_total += 1
+            self.num_masked += 1 if sum(duration_mask_rm) > 0 else 0
+            self.percentage_mask_tokens += sum(duration_mask_rm_exp) / len(duration_mask_rm_exp)
             durations[duration_mask_rm] = 0
             batch[i]["phone_durations"] = durations
             batch[i]["audio"]["array"] = audio[~duration_mask_rm_exp]
@@ -157,17 +164,17 @@ class MeTTSCollator():
                 batch[i]["measures"][measure.name]["array"] = torch.tensor(batch[i]["measures"][measure.name]["array"])
         with torch.no_grad():
             if any(not os.path.exists(x["audio_path"].replace(".wav", "_speaker.pt")) for x in batch):
-                result["embeddings"] = []
+                result["dvector"] = []
                 for x in batch:
                     try:
                         embed = self.dvector.model.embed_utterance(self.wav2mel.model(x["audio"]["array"].unsqueeze(0), 22050)).squeeze(0)
                     except RuntimeError:
                         embed = torch.zeros(256)
-                    result["embeddings"].append(embed)
+                    result["dvector"].append(embed)
                 for i, x in enumerate(batch):
-                    torch.save(result["embeddings"][i], x["audio_path"].replace(".wav", "_speaker.pt"))
+                    torch.save(result["dvector"][i], x["audio_path"].replace(".wav", "_speaker.pt"))
             else:
-                result["embeddings"] = torch.stack([torch.load(x["audio_path"].replace(".wav", "_speaker.pt")) for x in batch])
+                result["dvector"] = torch.stack([torch.load(x["audio_path"].replace(".wav", "_speaker.pt")) for x in batch])
             torch.cuda.empty_cache()
         result["audio"] = pad_sequence([x["audio"]["array"] for x in batch], batch_first=True)
         result["phone_durations"] = pad_sequence([x["phone_durations"] for x in batch], batch_first=True)
@@ -180,16 +187,11 @@ class MeTTSCollator():
         result["measure_stds"] = {}
 
         MAX_FRAMES = lco["max_lengths"]["frame"]
+        MAX_PHONES = lco["max_lengths"]["phone"]
         BATCH_SIZE = len(batch)
-        result["val_ind"] = (torch.zeros((MAX_FRAMES, BATCH_SIZE), dtype=torch.int64)
-            .scatter(
-                0,
-                result["phone_durations"].cumsum(-1).T,
-                torch.ones(MAX_FRAMES, BATCH_SIZE, dtype=torch.int64)
-            )
-            .T.cumsum(-1)
-        )
-
+        result["phone_durations"][:, -1] = MAX_FRAMES - result["phone_durations"].sum(-1)
+        result["val_ind"] = torch.arange(0, MAX_PHONES).repeat(BATCH_SIZE).reshape(BATCH_SIZE, MAX_PHONES)
+        result["val_ind"] = result["val_ind"].flatten().repeat_interleave(result["phone_durations"].flatten(), dim=0).reshape(BATCH_SIZE, MAX_FRAMES)
 
         for measure in self.measures:
             result["measures"][measure.name] = pad_sequence([x["measures"][measure.name]["array"] for x in batch], batch_first=True)

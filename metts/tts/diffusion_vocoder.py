@@ -27,7 +27,7 @@ class StepEmbedding(nn.Module):
     def forward(self, steps):
         half_dim = lco["diffusion_vocoder"]["step_embed_dim_in"] // 2
         _embed = np.log(10000) / (half_dim - 1)
-        _embed = torch.exp(torch.arange(half_dim) * -_embed).to(steps.device)
+        _embed = torch.exp(torch.arange(half_dim) * -_embed)
         _embed = steps * _embed
         diff_embed = torch.cat(
             (torch.sin(_embed), torch.cos(_embed)),

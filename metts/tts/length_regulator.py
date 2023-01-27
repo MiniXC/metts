@@ -16,7 +16,9 @@ class LengthRegulator(nn.Module):
         ind = val_ind + (MAX_PHONES * torch.arange(BATCH_SIZE)).unsqueeze(1)
         val = x.reshape((-1, EMB_DIM))
 
-        x = torch.nn.functional.embedding(ind.to(x.device), val, padding_idx=0)
-        tgt_mask = x.sum(-1) != 0
+        comp_ind = torch.arange(MAX_PHONES * BATCH_SIZE).reshape((BATCH_SIZE, MAX_PHONES))        
+
+        x = torch.nn.functional.embedding(ind.to(x.device), val)
+        tgt_mask = val_ind != (MAX_PHONES - 1)
         
         return x, tgt_mask
