@@ -3,7 +3,11 @@ import os
 
 import numpy as np
 import pyworld as pw
+import librosa
+import torch
 from srmrpy import SRMR
+from scipy import interpolate
+import lco
 
 from .snr import SNR
 
@@ -25,6 +29,8 @@ class Measure(ABC):
         pass
 
     def __call__(self, audio, durations, silence_mask=None, include_prior=False):
+        if not lco["measures"]["silence_mask"]:
+            silence_mask = None
         measure = self.compute(audio, durations, silence_mask)
         if include_prior:
             return {
@@ -88,7 +94,7 @@ class EnergyMeasure(Measure):
 
     def compute(self, audio, durations, silence_mask=None):
         energy = librosa.feature.rms(
-            audio.cpu().numpy(),
+            y=audio,
             frame_length=self.win_length,
             hop_length=self.hop_length,
             center=False,
@@ -109,7 +115,7 @@ class SRMRMeasure(Measure):
         self.srmr = SRMR(fs=sampling_rate, faster=True, norm=True)
 
     def compute(self, audio, durations, silence_mask=None):
-        _, frame_srmr = self.srmr(audio.cpu())
+        _, frame_srmr = self.srmr.srmr(torch.tensor(audio))
         if len(frame_srmr) == 1:
             srmr = np.repeat(frame_srmr, sum(durations))
         else:
@@ -132,10 +138,11 @@ class SNRMeasure(Measure):
         self.hop_length = hop_length
 
     def compute(self, audio, durations, silence_mask=None):
-        snr = SNR(audio.cpu().numpy().astype(np.float32), self.sampling_rate)
+        snr = SNR(audio.astype(np.float32), self.sampling_rate)
         snr = snr.windowed_wada(window=self.win_length, stride=self.hop_length/self.win_length, use_samples=True)
         if sum(durations) < len(snr):
             snr = snr[:sum(durations)]
+        print(silence_mask)
         if silence_mask is not None:
             snr[silence_mask] = np.nan
         if all(np.isnan(snr)):

@@ -5,6 +5,7 @@ from torch import nn
 import torch.nn.functional as F
 import lco
 import numpy as np
+from tqdm.auto import tqdm
 
 from .convolutions import ConvolutionLayer, Transpose, DepthwiseConv1d
 
@@ -38,7 +39,7 @@ class StepEmbedding(nn.Module):
         return diff_embed
 
 class SpectrogramUpsampler(nn.Module):
-  def __init__(self, n_mels):
+  def __init__(self):
     super().__init__()
     self.conv1 = nn.ConvTranspose2d(1, 1, [3, 32], stride=[1, 16], padding=[1, 8])
     self.conv2 = nn.ConvTranspose2d(1, 1,  [3, 32], stride=[1, 16], padding=[1, 8])
@@ -80,15 +81,16 @@ class ResidualBlock(nn.Module):
 
 
 class DiffWave(nn.Module):
+
     def __init__(self):
         super().__init__()
         self.input_projection = DepthwiseConv1d(1, lco["diffusion_vocoder"]["residual_channels"], 1)
         self.diffusion_embedding = StepEmbedding()
-        self.spectrogram_upsampler = SpectrogramUpsampler(lco["audio"]["n_mels"])
+        self.spectrogram_upsampler = SpectrogramUpsampler()
 
         self.residual_layers = nn.ModuleList([
             ResidualBlock(
-                lco["audio"]["n_mels"],
+                lco["audio"]["n_mels"] * 2,
                 lco["diffusion_vocoder"]["residual_channels"],
                 2**(i % lco["diffusion_vocoder"]["dilation_cycle_length"]),
             )
@@ -133,83 +135,141 @@ class DiffWave(nn.Module):
         x = F.relu(x)
         x = self.output_projection(x).squeeze(1)
         return x
-    
-# class MelUpsampler(nn.Module):
-#     def __init__(self):
-#         super().__init__()
-#         self.mel_upsample = nn.ModuleList(
-#             [
-#                 nn.utils.weight_norm(
-#                     nn.nn.ConvTranspose2d(
-#                         1,
-#                         1,
-#                         (3, 2 * s),
-#                         padding=(1, s // 2),
-#                         stride=(1, s)
-#                     )
-#                 ) for s in [16, 16]
-#             ]
-#         )
-#         self.mel_projection = Transpose(nn.nn.Linear(
-#             lco["diffusion_vocoder"]["conv_channels"],
-#             lco["diffusion_vocoder"]["conv_channels"]
-#         ))
+        
+class DiffWaveSampler():
 
-#     def forward(self, mel):
-#         mel = mel.unsqueeze(1)
-#         for upsample in self.mel_upsample:
-#             mel = F.leaky_relu(upsample(mel), 0.4, inplace=False)
-#         mel = mel.squeeze(1)
-#         mel = self.mel_projection(mel)
-#         return mel
+    # from https://github.com/Rongjiehuang/FastDiff
+    noise_schedules = {
+        "original": torch.linspace(
+            lco["diffusion_vocoder"]["beta_0"],
+            lco["diffusion_vocoder"]["beta_T"],
+            lco["diffusion_vocoder"]["T"]
+        ),
+        1000: torch.linspace(0.000001, 0.01, 1000),
+        200: torch.linspace(0.0001, 0.02, 200),
+        8: [
+            6.689325005027058e-07,
+            1.0033881153503899e-05,
+            0.00015496854030061513,
+            0.002387222135439515,
+            0.035597629845142365,
+            0.3681158423423767,
+            0.4735414385795593,
+            0.5,
+        ],
+        6: [
+            1.7838445955931093e-06,
+            2.7984189728158526e-05,
+            0.00043231004383414984,
+            0.006634317338466644,
+            0.09357017278671265,
+            0.6000000238418579
+        ],
+        4: [
+            3.2176e-04,
+            2.5743e-03,
+            2.5376e-02,
+            7.0414e-01
+        ],
+        3: [
+            9.0000e-05,
+            9.0000e-03,
+            6.0000e-01
+        ]
+    }
 
-# class DiffusionVocoder(nn.Module):
-#     def __init__(self):
-#         super().__init__()
+    def __init__(self, model, diff_params):
+        self.model = model
+        self.diff_params = diff_params
 
-#         self.step_embedding = StepEmbedding()
-#         self.init_conv = nn.Sequential(
-#             Conv(1, lco["diffusion_vocoder"]["conv_channels"], kernel_size=1),
-#             nn.ReLU(inplace=False)
-#         )
-#         self.mel_upsampler = MelUpsampler()
-#         kernel_size = lco["diffusion_vocoder"]["conv_kernel_size"]
-#         self.layers = nn.ModuleList([
-#             ConvolutionLayer(
-#                 in_channels=lco["diffusion_vocoder"]["conv_channels"],
-#                 filter_size=lco["diffusion_vocoder"]["conv_filter_size"],
-#                 out_channels=lco["diffusion_vocoder"]["conv_channels"],
-#                 kernel_size=kernel_size,
-#                 padding=(kernel_size - 1) // 2
-#             ) for _ in range(lco["diffusion_vocoder"]["conv_layers"])
-#         ])
-#         self.nn.Linear = Transpose(nn.nn.Linear(lco["diffusion_vocoder"]["conv_channels"], 1))
-    
-#     @staticmethod
-#     def compute_diffusion_params(beta):
-#         """
-#         Compute diffusion parameters from beta
-#         source: https://github.com/tencent-ailab/bddm/blob/2cebe0e6b7fd4ce8121a45d1194e2eb708597936/bddm/utils/diffusion_utils.py#L16
-#         """
-#         alpha = 1 - beta
-#         sigma = beta + 0
-#         for t in range(1, len(beta)):
-#             alpha[t] *= alpha[t-1]
-#             sigma[t] *= (1-alpha[t-1]) / (1-alpha[t])
-#         alpha = torch.sqrt(alpha)
-#         sigma = torch.sqrt(sigma)
-#         diff_params = {"T": len(beta), "beta": beta, "alpha": alpha, "sigma": sigma}
-#         return diff_params
+    def __call__(self, c, N=4):
+        if N not in self.noise_schedules:
+            raise ValueError(f"Invalid noise schedule length {N}")
 
-#     def forward(self, x, mel, steps):
-#         diff_embed = self.step_embedding(steps)
-#         diff_embed = diff_embed.view(x.shape[0], lco["diffusion_vocoder"]["conv_channels"], -1)
-#         x = x.unsqueeze(1)
-#         x = self.init_conv(x)
-#         mel = self.mel_upsampler(mel)
-#         x = x + diff_embed + mel
-#         for layer in self.layers:
-#             x = layer(x)
-#         x = self.nn.Linear(x).squeeze(1)
-#         return x
-    
+        noise_schedule = self.noise_schedules[N]
+
+        if not isinstance(noise_schedule, torch.Tensor):
+            noise_schedule = torch.FloatTensor(noise_schedule)
+
+        noise_schedule = noise_schedule.to(c.device)
+
+        audio_length = c.shape[-1] * lco["audio"]["hop_length"]
+
+        pred_wav = self.sampling_given_noise_schedule(
+            (1, audio_length),
+            noise_schedule,
+            c,
+        )
+
+        pred_wav = pred_wav / pred_wav.abs().max()
+        pred_wav = pred_wav.view(-1)
+        return pred_wav
+
+    def sampling_given_noise_schedule(
+        self,
+        size,
+        noise_schedule,
+        c
+    ):
+        """
+        Perform the complete sampling step according to p(x_0|x_T) = \prod_{t=1}^T p_{\theta}(x_{t-1}|x_t)
+        Parameters:
+        net (torch network):            the wavenet models
+        size (tuple):                   size of tensor to be generated,
+                                        usually is (number of audios to generate, channels=1, length of audio)
+        diffusion_hyperparams (dict):   dictionary of diffusion hyperparameters returned by calc_diffusion_hyperparams
+                                        note, the tensors need to be cuda tensors
+        condition (torch.tensor):       ground truth mel spectrogram read from disk
+                                        None if used for unconditional generation
+        Returns:
+        the generated audio(s) in torch.tensor, shape=size
+        """
+
+        _dh = self.diff_params
+        T, alpha = _dh["T"], _dh["alpha"]
+        assert len(alpha) == T
+        assert len(size) == 3 or len(size) == 2
+
+        N = len(noise_schedule)
+        beta_infer = noise_schedule
+        alpha_infer = 1 - beta_infer
+        sigma_infer = beta_infer + 0
+        for n in range(1, N):
+            alpha_infer[n] *= alpha_infer[n - 1]
+            sigma_infer[n] *= (1 - alpha_infer[n - 1]) / (1 - alpha_infer[n])
+        alpha_infer = torch.sqrt(alpha_infer)
+        sigma_infer = torch.sqrt(sigma_infer)
+
+        # Mapping noise scales to time steps
+        steps_infer = []
+        for n in range(N):
+            step = self.map_noise_scale_to_time_step(alpha_infer[n], alpha)
+            if step >= 0:
+                steps_infer.append(step)
+        steps_infer = torch.FloatTensor(steps_infer)
+
+        N = len(steps_infer)
+
+        x = torch.normal(0, 1, size=size).to(c.device)
+        with torch.no_grad():
+            for n in tqdm(range(N - 1, -1, -1), desc="Sampling"):
+                ts = (steps_infer[n] * torch.ones((size[0], 1))).to(c.device)
+                e = self.model(x, c, ts)
+                x -= beta_infer[n] / torch.sqrt(1 - alpha_infer[n] ** 2.) * e
+                x /= torch.sqrt(1 - beta_infer[n])
+                if n > 0:
+                    z = torch.normal(0, 1, size=size).to(c.device)
+                    x = x + sigma_infer[n] * z
+        return x
+
+    def map_noise_scale_to_time_step(self, alpha_infer, alpha):
+        if alpha_infer < alpha[-1]:
+            return len(alpha) - 1
+        if alpha_infer > alpha[0]:
+            return 0
+        for t in range(len(alpha) - 1):
+            if alpha[t+1] <= alpha_infer <= alpha[t]:
+                step_diff = alpha[t] - alpha_infer
+                step_diff /= alpha[t] - alpha[t+1]
+                return t + step_diff.item()
+        return -1
