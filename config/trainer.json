@@ -4,9 +4,9 @@
     "per_device_eval_batch_size": 16,
     "learning_rate": 1e-4,
     "warmup_ratio": 0.05,
-    "report_to": "wandb",
+    "report_to": "none",
     "max_steps": 60000,
-    "dataloader_num_workers": 32,
+    "dataloader_num_workers": 40,
     "remove_unused_columns": false,
     "evaluation_strategy": "epoch",
     "save_strategy": "epoch"

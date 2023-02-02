@@ -29,20 +29,20 @@ class MeTTS(PreTrainedModel):
         self.positional_encoding = PositionalEncoding(256)
 
         # processing
-        self.mel = MelSpectrogram(
-            sr=lco["audio"]["sampling_rate"],
-            n_fft=lco["audio"]["n_fft"],
-            win_length=lco["audio"]["win_length"],
-            hop_length=lco["audio"]["hop_length"],
-            n_mels=lco["audio"]["n_mels"],
-            pad_mode="constant",
-            power=2,
-            htk=True,
-            fmin=0,
-            fmax=8000,
-            # trainable_mel=True,
-            # trainable_STFT=True,
-        )
+        # self.mel = MelSpectrogram(
+        #     sr=lco["audio"]["sampling_rate"],
+        #     n_fft=lco["audio"]["n_fft"],
+        #     win_length=lco["audio"]["win_length"],
+        #     hop_length=lco["audio"]["hop_length"],
+        #     n_mels=lco["audio"]["n_mels"],
+        #     pad_mode="constant",
+        #     power=2,
+        #     htk=True,
+        #     fmin=0,
+        #     fmax=8000,
+        #     # trainable_mel=True,
+        #     # trainable_STFT=True,
+        # )
 
         # layers
         self.speaker_embedding = nn.Embedding(2500, 256)
@@ -114,12 +114,12 @@ class MeTTS(PreTrainedModel):
         else:
             return torch.log(torch.clamp(x, min=clip_val) * C)
 
-    def forward(self, phones, phone_durations, audio, val_ind, speaker, **kwargs):
+    def forward(self, phones, phone_durations, mel, val_ind, speaker, vocoder_mask, vocoder_audio, **kwargs):
         ### Transformer TTS
-        tts = self.tts_fwd(phones, phone_durations, audio, val_ind, speaker)
+        tts = self.tts_fwd(phones, phone_durations, mel, val_ind, speaker)
 
         ### Diffusion Vocoder
-        vocoder = self.vocoder_fwd(tts["mel"], tts["hidden"], audio)
+        vocoder = self.vocoder_fwd(tts["mel"][:, :, vocoder_mask], tts["hidden"][:, vocoder_mask, :], vocoder_audio)
 
         return {
             "loss": tts["loss"] + vocoder["loss"],
@@ -137,7 +137,7 @@ class MeTTS(PreTrainedModel):
 
         return attr
 
-    def tts_fwd(self, x, durations, audio, val_ind, speaker):
+    def tts_fwd(self, x, durations, mel, val_ind, speaker):
         batch_size = x.shape[0]
         x = self.embedding(x)
         speaker = self.speaker_embedding(speaker)
@@ -145,21 +145,19 @@ class MeTTS(PreTrainedModel):
         x = self.positional_encoding(x)
         x = self.encoder(x)
 
-        self.attribute_fwd(x, speaker)
+        #self.attribute_fwd(x, speaker)
 
         x, mask = self.lr(x, durations, val_ind)
         x = self.positional_encoding(x)
         x, hidden = self.decoder(x)
         x = self.linear(x)
 
-        mel = self.mel(audio).transpose(1, 2)
         if x.shape[1] > mel.shape[1]:
             mel = nn.ConstantPad2d((0, 0, 0, x.shape[1] - mel.shape[1]), 0)(mel)
         else:
             mel = mel[:, :x.shape[1]]
         mask = mask.unsqueeze(-1)
         mel = mel.transpose(1, 2)
-        mel = MeTTS.drc(mel)
 
         x = x.transpose(1, 2)
 
@@ -172,17 +170,11 @@ class MeTTS(PreTrainedModel):
             "mel": mel,
         }
 
-    def vocoder_fwd(self, mel, hidden, audio, window_slice=None):
+    def vocoder_fwd(self, mel, hidden, audio):
         batch_size = mel.shape[0]
-        max_len = lco["max_lengths"]["vocoder"]
-        if window_slice is None:
-            window_slice = slice(0, max_len)
         hidden = self.hidden_linear(hidden)
-        hidden = hidden[:, window_slice]
         hidden = hidden.transpose(1, 2)
-        mel = mel[:, :, window_slice]
-        hidden = torch.cat((hidden, mel), dim=1)
-        audio = audio[:, window_slice.start*256:window_slice.stop*256]
+        hidden = mel + hidden * 0.1
         ts = torch.randint(low=0, high=lco["diffusion_vocoder"]["T"], size=(batch_size, 1))
         noise_scales = self.diff_params["alpha"].to(mel.device)[ts]
         z = torch.normal(0, 1, size=audio.shape).to(mel.device)

@@ -142,7 +142,6 @@ class SNRMeasure(Measure):
         snr = snr.windowed_wada(window=self.win_length, stride=self.hop_length/self.win_length, use_samples=True)
         if sum(durations) < len(snr):
             snr = snr[:sum(durations)]
-        print(silence_mask)
         if silence_mask is not None:
             snr[silence_mask] = np.nan
         if all(np.isnan(snr)):

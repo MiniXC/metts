@@ -20,11 +20,17 @@ def main(index):
     dev = dataset["dev"]
     speaker2idx = json.load(open("data/speaker2idx.json"))
     phone2idx = json.load(open("data/phone2idx.json"))
+    measure_stats = json.load(open("data/measure_stats.json"))
+    
     collator = MeTTSCollator(
         speaker2idx=speaker2idx,
         phone2idx=phone2idx,
+        measure_stats=measure_stats,
         measures=[
             PitchMeasure(),
+            EnergyMeasure(),
+            SRMRMeasure(),
+            SNRMeasure(),
         ],
     )
 

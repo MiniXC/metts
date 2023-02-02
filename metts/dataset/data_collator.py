@@ -7,7 +7,7 @@ import json
 import numpy as np
 import torch
 from torch.nn.utils.rnn import pad_sequence
-from torch.nn import ConstantPad1d
+from torch.nn import ConstantPad1d, ConstantPad2d
 import torchaudio
 from transformers import Wav2Vec2FeatureExtractor, WavLMForXVector
 from nnAudio.features.mel import MelSpectrogram
@@ -116,9 +116,10 @@ class MeTTSCollator():
             audio = (audio - audio.mean()) / audio.std()
             
             # compute mel spectrogram
-            mel = MeTTSCollator.drc(self.mel(torch.tensor(audio).unsqueeze(0))).numpy()
-            mel_means.append(mel.mean())
-            mel_stds.append(mel.std())
+            mel = MeTTSCollator.drc(self.mel(torch.tensor(audio).unsqueeze(0)))
+            mel_means.append(mel.mean().item())
+            mel_stds.append(mel.std().item())
+            batch[i]["mel"] = ((mel - mel.mean()) / mel.std())[0].T
 
             durations = np.array(row["phone_durations"])
             duration_means.append(durations.mean())
@@ -141,11 +142,18 @@ class MeTTSCollator():
             duration_mask_rm = duration_mask_rm[np.argsort(duration_permutation)]
             batch[i]["phones"][duration_mask_rm] = self.phone2idx["MASK"]
             duration_mask_rm_exp = np.repeat(duration_mask_rm, durations * 256)
+            duration_mask_rm_exp_frame = np.repeat(duration_mask_rm, durations)
             self.num_total += 1
             self.num_masked += 1 if sum(duration_mask_rm) > 0 else 0
             self.percentage_mask_tokens += sum(duration_mask_rm_exp) / len(duration_mask_rm_exp)
             durations[duration_mask_rm] = 0
             batch[i]["audio"]["array"] = audio[~duration_mask_rm_exp]
+            if batch[i]["mel"].shape[0] > duration_mask_rm_exp_frame.shape[0]:
+                batch[i]["mel"] = batch[i]["mel"][:duration_mask_rm_exp_frame.shape[0]]
+            if batch[i]["mel"].shape[0] < duration_mask_rm_exp_frame.shape[0]:
+                batch[i]["mel"] = torch.cat([batch[i]["mel"], torch.zeros(1, batch[i]["mel"].shape[1])])
+            
+            batch[i]["mel"] = batch[i]["mel"][~duration_mask_rm_exp_frame]
             dur_sum = sum(durations)
             unexpanded_silence_mask = ["[" in p for p in phones]
             silence_mask = self._expand(unexpanded_silence_mask, durations)
@@ -183,6 +191,8 @@ class MeTTSCollator():
             batch[i]["audio_path"] = row["audio"]["path"]
         max_frame_length = max([sum(x["phone_durations"]) for x in batch])
         max_phone_length = max([len(x["phones"]) for x in batch])
+        min_frame_length = min([sum(x["phone_durations"]) for x in batch])
+        random_min_frame_length = np.random.randint(0, min_frame_length)
         if self.pad_to_multiple_of is not None:
             max_frame_length = (max_frame_length // self.pad_to_multiple_of + 1) * self.pad_to_multiple_of
             max_phone_length = (max_phone_length // self.pad_to_multiple_of + 1) * self.pad_to_multiple_of
@@ -193,6 +203,9 @@ class MeTTSCollator():
         batch[0]["audio"]["array"] = ConstantPad1d(
             (0, max_audio_length - len(batch[0]["audio"]["array"])), 0
         )(torch.tensor(batch[0]["audio"]["array"]))
+        batch[0]["mel"] = ConstantPad2d(
+            (0, 0, 0, max_frame_length - batch[0]["mel"].shape[0]), 0
+        )(batch[0]["mel"])
         batch[0]["phone_durations"] = ConstantPad1d(
             (0, max_phone_length - len(batch[0]["phone_durations"])), 0
         )(torch.tensor(batch[0]["phone_durations"]))
@@ -229,6 +242,7 @@ class MeTTSCollator():
                 result["dvector"] = torch.stack([torch.load(x["audio_path"].replace(".wav", "_speaker.pt")) for x in batch])
             torch.cuda.empty_cache()
         result["audio"] = pad_sequence([x["audio"]["array"] for x in batch], batch_first=True)
+        result["mel"] = pad_sequence([x["mel"] for x in batch], batch_first=True)
         result["phone_durations"] = pad_sequence([x["phone_durations"] for x in batch], batch_first=True)
         result["durations"] = pad_sequence([x["durations"] for x in batch], batch_first=True)
         result["phones"] = pad_sequence([x["phones"] for x in batch], batch_first=True)
@@ -238,6 +252,15 @@ class MeTTSCollator():
         result["measures"] = {}
         result["means"] = {}
         result["stds"] = {}
+
+        result["vocoder_mask"] = torch.zeros((max_frame_length))
+        result["vocoder_mask"][random_min_frame_length:lco["max_lengths"]["vocoder"]+random_min_frame_length] = 1
+        result["vocoder_mask"] = result["vocoder_mask"].bool()
+        audio_min_idx = random_min_frame_length*lco["audio"]["hop_length"]
+        audio_max_idx = (lco["max_lengths"]["vocoder"]+random_min_frame_length)*lco["audio"]["hop_length"]
+        result["vocoder_audio"] = result["audio"][:,audio_min_idx:audio_max_idx]
+
+        del result["audio"]
 
         MAX_FRAMES = lco["max_lengths"]["frame"]
         MAX_PHONES = lco["max_lengths"]["phone"]

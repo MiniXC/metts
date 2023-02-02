@@ -9,6 +9,9 @@ from tqdm.auto import tqdm
 
 from .convolutions import ConvolutionLayer, Transpose, DepthwiseConv1d
 
+
+lco.init("config/config.yaml")
+
 class StepEmbedding(nn.Module):
     def __init__(self):
         super().__init__()
@@ -64,8 +67,6 @@ class ResidualBlock(nn.Module):
         self.output_projection = DepthwiseConv1d(residual_channels, 2 * residual_channels, 1)
 
     def forward(self, x, diffusion_step, conditioner=None):
-        assert (conditioner is None and self.conditioner_projection is None) or \
-                (conditioner is not None and self.conditioner_projection is not None)
 
         diffusion_step = self.diffusion_projection(diffusion_step).unsqueeze(-1)
         y = x + diffusion_step
@@ -90,7 +91,7 @@ class DiffWave(nn.Module):
 
         self.residual_layers = nn.ModuleList([
             ResidualBlock(
-                lco["audio"]["n_mels"] * 2,
+                lco["audio"]["n_mels"],
                 lco["diffusion_vocoder"]["residual_channels"],
                 2**(i % lco["diffusion_vocoder"]["dilation_cycle_length"]),
             )
