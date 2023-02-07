@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import lco
 import numpy as np
 from tqdm.auto import tqdm
+from transformers import PreTrainedModel, PretrainedConfig
 
 from .convolutions import ConvolutionLayer, Transpose, DepthwiseConv1d
 
@@ -274,3 +275,43 @@ class DiffWaveSampler():
                 step_diff /= alpha[t] - alpha[t+1]
                 return t + step_diff.item()
         return -1
+
+class VocoderConfig(PretrainedConfig):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+class Vocoder(PreTrainedModel):
+    config_class = VocoderConfig
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.diffusion_vocoder = DiffWave()
+        noise_schedule = torch.linspace(
+            lco["diffusion_vocoder"]["beta_0"],
+            lco["diffusion_vocoder"]["beta_T"],
+            lco["diffusion_vocoder"]["T"]
+        )
+        self.diff_params = DiffWave.compute_diffusion_params(noise_schedule)
+
+    def forward(self, mel, vocoder_mask, vocoder_audio, **kwargs):
+        batch_size = mel.shape[0]
+        c = mel.transpose(1,2)[:, :, vocoder_mask]
+        audio = vocoder_audio
+        ts = torch.randint(low=0, high=lco["diffusion_vocoder"]["T"], size=(batch_size, 1))
+        noise_scales = self.diff_params["alpha"].to(mel.device)[ts]
+        z = torch.normal(0, 1, size=audio.shape).to(mel.device)
+        noisy_audios = noise_scales * audio + (1 - noise_scales**2.).sqrt() * z
+        e = self.diffusion_vocoder(noisy_audios, c, ts.to(mel.device))
+        loss = nn.MSELoss()(e, z)
+
+        return {
+            "loss": loss,
+            "logits": e,
+        }
+
+    def generate(self, mel, n):
+        sampler = DiffWaveSampler(self.diffusion_vocoder, self.diff_params)
+
+        audio = sampler(mel, n)
+        
+        return audio

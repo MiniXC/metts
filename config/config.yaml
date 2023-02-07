@@ -21,3 +21,5 @@ diffusion_vocoder:
   residual_layers: 30
   dilation_cycle_length: 10
 meta: [duration, mel, audio, energy, pitch, srmr, snr]
+evaluation:
+  sampling_T: 4

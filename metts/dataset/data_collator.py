@@ -39,6 +39,7 @@ class MeTTSCollator():
         measures=None,
         pad_to_max_length=True,
         pad_to_multiple_of=None,
+        include_audio=False,
     ):
         self.sampling_rate = lco["audio"]["sampling_rate"]
         self.measures = measures
@@ -73,6 +74,8 @@ class MeTTSCollator():
             # trainable_mel=True,
             # trainable_STFT=True,
         )
+
+        self.include_audio = include_audio
 
     @staticmethod
     def drc(x, C=1, clip_val=1e-1, log10=True):
@@ -260,7 +263,8 @@ class MeTTSCollator():
         audio_max_idx = (lco["max_lengths"]["vocoder"]+random_min_frame_length)*lco["audio"]["hop_length"]
         result["vocoder_audio"] = result["audio"][:,audio_min_idx:audio_max_idx]
 
-        del result["audio"]
+        if not self.include_audio:
+            del result["audio"]
 
         MAX_FRAMES = lco["max_lengths"]["frame"]
         MAX_PHONES = lco["max_lengths"]["phone"]

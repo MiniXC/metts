@@ -106,14 +106,6 @@ class MeTTS(PreTrainedModel):
         )
         self.diff_params = DiffWave.compute_diffusion_params(noise_schedule)
 
-    @staticmethod
-    def drc(x, C=1, clip_val=1e-5, log10=True):
-        """Dynamic Range Compression"""
-        if log10:
-            return torch.log10(torch.clamp(x, min=clip_val) * C)
-        else:
-            return torch.log(torch.clamp(x, min=clip_val) * C)
-
     def forward(self, phones, phone_durations, mel, val_ind, speaker, vocoder_mask, vocoder_audio, **kwargs):
         ### Transformer TTS
         tts = self.tts_fwd(phones, phone_durations, mel, val_ind, speaker)
