@@ -18,3 +18,4 @@ phones==0.0.6
 sqlalchemy==1.*
 praatio==5.*
 mel-cepstral-distance==0.0.2
+pynini==2.1.5
