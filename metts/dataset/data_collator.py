@@ -40,6 +40,8 @@ class MeTTSCollator():
         pad_to_max_length=True,
         pad_to_multiple_of=None,
         include_audio=False,
+        overwrite_max_length=True,
+        keys=["vocoder_mel", "vocoder_audio"],
     ):
         self.sampling_rate = lco["audio"]["sampling_rate"]
         self.measures = measures
@@ -76,6 +78,9 @@ class MeTTSCollator():
         )
 
         self.include_audio = include_audio
+        self.overwrite_max_length = overwrite_max_length
+
+        self.keys = keys
 
     @staticmethod
     def drc(x, C=1, clip_val=1e-1, log10=True):
@@ -199,7 +204,7 @@ class MeTTSCollator():
         if self.pad_to_multiple_of is not None:
             max_frame_length = (max_frame_length // self.pad_to_multiple_of + 1) * self.pad_to_multiple_of
             max_phone_length = (max_phone_length // self.pad_to_multiple_of + 1) * self.pad_to_multiple_of
-        if self.pad_to_max_length:
+        if self.pad_to_max_length and self.overwrite_max_length:
             max_frame_length = max(self.max_frame_length, max_frame_length)
             max_phone_length = max(self.max_phone_length, max_phone_length)
         max_audio_length = (max_frame_length * lco["audio"]["hop_length"])
@@ -262,16 +267,18 @@ class MeTTSCollator():
         audio_min_idx = random_min_frame_length*lco["audio"]["hop_length"]
         audio_max_idx = (lco["max_lengths"]["vocoder"]+random_min_frame_length)*lco["audio"]["hop_length"]
         result["vocoder_audio"] = result["audio"][:,audio_min_idx:audio_max_idx]
+        result["vocoder_mel"] = result["mel"].transpose(1,2)[:, :, result["vocoder_mask"]]
 
         if not self.include_audio:
             del result["audio"]
 
-        MAX_FRAMES = lco["max_lengths"]["frame"]
-        MAX_PHONES = lco["max_lengths"]["phone"]
-        BATCH_SIZE = len(batch)
-        result["phone_durations"][:, -1] = MAX_FRAMES - result["phone_durations"].sum(-1)
-        result["val_ind"] = torch.arange(0, MAX_PHONES).repeat(BATCH_SIZE).reshape(BATCH_SIZE, MAX_PHONES)
-        result["val_ind"] = result["val_ind"].flatten().repeat_interleave(result["phone_durations"].flatten(), dim=0).reshape(BATCH_SIZE, MAX_FRAMES)
+        if self.overwrite_max_length:
+            MAX_FRAMES = lco["max_lengths"]["frame"]
+            MAX_PHONES = lco["max_lengths"]["phone"]
+            BATCH_SIZE = len(batch)
+            result["phone_durations"][:, -1] = MAX_FRAMES - result["phone_durations"].sum(-1)
+            result["val_ind"] = torch.arange(0, MAX_PHONES).repeat(BATCH_SIZE).reshape(BATCH_SIZE, MAX_PHONES)
+            result["val_ind"] = result["val_ind"].flatten().repeat_interleave(result["phone_durations"].flatten(), dim=0).reshape(BATCH_SIZE, MAX_FRAMES)
 
         if self.measures is not None:
             for measure in self.measures:
@@ -293,5 +300,72 @@ class MeTTSCollator():
         for k in result["means"]:
             result["means"][k] = (result["means"][k] - self.measure_stats[k]["mean"][0]) / self.measure_stats[k]["mean"][1]
             result["stds"][k] = (result["stds"][k] - self.measure_stats[k]["std"][0]) / self.measure_stats[k]["std"][1]
+
+        result = {
+            k: v
+            for k, v in result.items()
+            if k in self.keys
+        }
+
+        return result
+
+class VocoderCollator():
+    def __init__(
+        self,
+        include_audio=False,
+    ):
+        self.sampling_rate = lco["audio"]["sampling_rate"]
+
+        self.include_audio = include_audio
+
+    @staticmethod
+    def drc(x, C=1, clip_val=1e-5, log10=True):
+        """Dynamic Range Compression"""
+        if log10:
+            return torch.log10(torch.clamp(x, min=clip_val) * C)
+        else:
+            return torch.log(torch.clamp(x, min=clip_val) * C)
+        
+    
+    def collate_fn(self, batch):
+        result = {}
+
+        chunk_length = lco["max_lengths"]["vocoder"]
+        hop_length = lco["audio"]["hop_length"]
+
+        full_audios = []
+
+        for i, row in enumerate(batch):
+            sr = self.sampling_rate
+            start = int(sr * row["start"])
+            end = int(sr * row["end"])
+            audio = row["audio"]["array"]
+            audio = audio[start:end]
+
+            # normalize audio
+            audio = (audio - audio.mean()) / audio.std()
+
+            if self.include_audio:
+                full_audios.append(audio)
+
+            
+            # get random chunk of audio
+            audio_length = audio.shape[0]
+            if (audio_length/hop_length)-chunk_length <= 0:
+                audio = np.pad(audio, (0, chunk_length*hop_length-audio_length), mode="constant")
+            else:
+                if (audio_length//hop_length)-chunk_length <= 0:
+                    start = 0
+                else:
+                    start = np.random.randint(0, (audio_length//hop_length)-chunk_length)
+                audio = audio[start*hop_length:(start+chunk_length)*hop_length]
+
+
+            batch[i]["audio"]["array"] = audio
+
+        result["audio"] = torch.tensor(np.stack([x["audio"]["array"] for x in batch]))
+
+        if self.include_audio:
+            result["full_audio"] = torch.tensor(np.stack(full_audios))
 
         return result

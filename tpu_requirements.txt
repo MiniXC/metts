@@ -18,3 +18,5 @@ phones==0.0.6
 sqlalchemy==1.*
 praatio==5.*
 mel-cepstral-distance==0.0.2
+pystoi==0.3.3
+pesq==0.0.4

@@ -7,6 +7,7 @@ import lco
 import numpy as np
 from tqdm.auto import tqdm
 from transformers import PreTrainedModel, PretrainedConfig
+from nnAudio.features.mel import MelSpectrogram
 
 from .convolutions import ConvolutionLayer, Transpose, DepthwiseConv1d
 
@@ -254,7 +255,7 @@ class DiffWaveSampler():
 
         x = torch.normal(0, 1, size=size).to(c.device)
         with torch.no_grad():
-            for n in tqdm(range(N - 1, -1, -1), desc="Sampling"):
+            for n in range(N - 1, -1, -1):
                 ts = (steps_infer[n] * torch.ones((size[0], 1))).to(c.device)
                 e = self.model(x, c, ts)
                 x -= beta_infer[n] / torch.sqrt(1 - alpha_infer[n] ** 2.) * e
@@ -291,12 +292,40 @@ class Vocoder(PreTrainedModel):
             lco["diffusion_vocoder"]["beta_T"],
             lco["diffusion_vocoder"]["T"]
         )
+        self.mel = MelSpectrogram(
+            sr=lco["audio"]["sampling_rate"],
+            n_fft=lco["audio"]["n_fft"],
+            win_length=lco["audio"]["win_length"],
+            hop_length=lco["audio"]["hop_length"],
+            n_mels=lco["audio"]["n_mels"],
+            pad_mode="constant",
+            power=2,
+            htk=True,
+            fmin=0,
+            fmax=8000,
+            trainable_mel=True,
+            trainable_STFT=True,
+        )
         self.diff_params = DiffWave.compute_diffusion_params(noise_schedule)
 
-    def forward(self, mel, vocoder_mask, vocoder_audio, **kwargs):
-        batch_size = mel.shape[0]
-        c = mel.transpose(1,2)[:, :, vocoder_mask]
-        audio = vocoder_audio
+    @staticmethod
+    def drc(x, C=1, clip_val=1e-5, log10=True):
+        """Dynamic Range Compression"""
+        if log10:
+            return torch.log10(torch.clamp(x, min=clip_val) * C)
+        else:
+            return torch.log(torch.clamp(x, min=clip_val) * C)
+
+    def forward(self, audio, **kwargs):
+        batch_size = audio.shape[0]
+        mel = Vocoder.drc(self.mel(audio))
+        mel_size = lco["max_lengths"]["vocoder"]
+        if mel.shape[2] > mel_size:
+            mel = mel[:, :, :mel_size]
+        elif mel.shape[2] < mel_size:
+            mel = F.pad(mel, (0, mel_size - mel.shape[2]), "constant", 0)
+
+        c = mel
         ts = torch.randint(low=0, high=lco["diffusion_vocoder"]["T"], size=(batch_size, 1))
         noise_scales = self.diff_params["alpha"].to(mel.device)[ts]
         z = torch.normal(0, 1, size=audio.shape).to(mel.device)

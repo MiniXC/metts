@@ -23,3 +23,5 @@ diffusion_vocoder:
 meta: [duration, mel, audio, energy, pitch, srmr, snr]
 evaluation:
   sampling_T: 4
+  num_workers: 8
+  chunk_size: 128
