@@ -1,4 +1,4 @@
-alignments==0.0.10
+alignments==0.0.12
 datasets==2.9.0
 librosa==0.9.2
 numpy==1.23.5
@@ -20,3 +20,4 @@ praatio==5.*
 mel-cepstral-distance==0.0.2
 pystoi==0.3.3
 pesq==0.0.4
+pynini==2.1.5
