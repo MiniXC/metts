@@ -20,8 +20,10 @@ diffusion_vocoder:
   residual_channels: 64
   residual_layers: 30
   dilation_cycle_length: 10
+  learnable_mel: true
 meta: [duration, mel, audio, energy, pitch, srmr, snr]
 evaluation:
   sampling_T: 8
   num_workers: 8
   chunk_size: 128
+  save_audio: False

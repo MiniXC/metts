@@ -1,15 +1,18 @@
 {
     "output_dir": "output",
-    "per_device_train_batch_size": 16,
+    "per_device_train_batch_size": 32,
     "per_device_eval_batch_size": 1,
     "learning_rate": 2e-4,
-    "warmup_ratio": 0.05,
-    "report_to": "wandb",
-    "max_steps": 1000000,
-    "run_name": "vocoder_diffwave_1000_learnable",
+    "warmup_ratio": 0.01,
+    "report_to": "none",
+    "max_steps": 250000,
+    "run_name": "dw-lrmel-1k",
     "dataloader_num_workers": 16,
     "remove_unused_columns": false,
     "evaluation_strategy": "steps",
-    "eval_steps": 1000000,
-    "save_strategy": "epoch"
+    "save_strategy": "steps",
+    "eval_steps": 20000,
+    "save_steps": 20000,
+    "bf16": true,
+    "bf16_full_eval": true
 }

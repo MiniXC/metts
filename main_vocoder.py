@@ -27,13 +27,15 @@ def main(index):
     
     collator = VocoderCollator()
 
-    #model = Vocoder(VocoderConfig())
+    model = Vocoder(VocoderConfig())
 
-    model = Vocoder.from_pretrained("output/checkpoint-305286")
+    #model = Vocoder.from_pretrained("output/checkpoint-74460")
+    #model = model.to(dtype=torch.bfloat16)
 
     metrics = Metrics(
         dev,
         collator,
+        save_audio=lco["evaluation"]["save_audio"]
     )
 
     trainer = Trainer(
