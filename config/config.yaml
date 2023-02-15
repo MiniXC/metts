@@ -7,7 +7,7 @@ audio:
 max_lengths:
   phone: 448
   frame: 576
-  vocoder: 64
+  vocoder: 128
 measures:
   silence_mask: False
 diffusion_vocoder:
@@ -20,7 +20,7 @@ diffusion_vocoder:
   residual_channels: 64
   residual_layers: 30
   dilation_cycle_length: 10
-  learnable_mel: true
+  learnable_mel: false
 meta: [duration, mel, audio, energy, pitch, srmr, snr]
 evaluation:
   sampling_T: 8

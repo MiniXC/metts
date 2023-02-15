@@ -303,8 +303,8 @@ class Vocoder(PreTrainedModel):
             htk=True,
             fmin=0,
             fmax=8000,
-            # trainable_mel=True,
-            # trainable_STFT=True,
+            trainable_mel=lco["vocoder"]["learnable_mel"],
+            trainable_STFT=True,
         )
         self.diff_params = DiffWave.compute_diffusion_params(noise_schedule)
 
