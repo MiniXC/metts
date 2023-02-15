@@ -27,9 +27,9 @@ def main(index):
     
     collator = VocoderCollator()
 
-    model = Vocoder(VocoderConfig())
+    #model = Vocoder(VocoderConfig())
 
-    # model = Vocoder.from_pretrained("output/checkpoint-60000")
+    model = Vocoder.from_pretrained("output/checkpoint-305286")
 
     metrics = Metrics(
         dev,

@@ -11,9 +11,9 @@ max_lengths:
 measures:
   silence_mask: False
 diffusion_vocoder:
-  T: 200
-  beta_0: 0.0001
-  beta_T: 0.02
+  T: 1000
+  beta_0: 0.000001
+  beta_T: 0.01
   step_embed_dim_in: 128
   step_embed_dim_out: 512
   step_embed_dim_hidden: 512
@@ -22,6 +22,6 @@ diffusion_vocoder:
   dilation_cycle_length: 10
 meta: [duration, mel, audio, energy, pitch, srmr, snr]
 evaluation:
-  sampling_T: 4
+  sampling_T: 8
   num_workers: 8
   chunk_size: 128

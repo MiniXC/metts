@@ -101,7 +101,7 @@ class Metrics():
 
         if self.save_audio:
             save_path = Path(f"examples/audio/{self.trainer.args.run_name}")
-            save_path.mkdir(exist_ok=True)
+            save_path.mkdir(exist_ok=True, parents=True)
 
         for i, batch in enumerate(self.loader):
             if i >= prc_index:
@@ -125,12 +125,12 @@ class Metrics():
                     wf.write(
                         save_path / f"{i}.wav",
                         lco["audio"]["sampling_rate"],
-                        audio_pred.cpu().detach().numpy(),
+                        audio_pred.cpu().detach().numpy().flatten(),
                     )
                     wf.write(
                         save_path / f"{i}_true.wav",
                         lco["audio"]["sampling_rate"],
-                        audio_true.cpu().detach().numpy(),
+                        audio_true.cpu().detach().numpy().flatten(),
                     )
                 count += 1
             if count >= self.num_examples:

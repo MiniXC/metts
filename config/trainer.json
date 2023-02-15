@@ -6,7 +6,7 @@
     "warmup_ratio": 0.05,
     "report_to": "wandb",
     "max_steps": 1000000,
-    "run_name": "vocoder_diffwave",
+    "run_name": "vocoder_diffwave_1000_learnable",
     "dataloader_num_workers": 16,
     "remove_unused_columns": false,
     "evaluation_strategy": "steps",
