@@ -24,8 +24,10 @@ def main(index):
     speaker2idx = json.load(open("data/speaker2idx.json"))
     phone2idx = json.load(open("data/phone2idx.json"))
     measure_stats = json.load(open("data/measure_stats.json"))
-    
-    collator = VocoderCollator()
+
+    collator = VocoderCollator(
+        include_audio=lco["evaluation"]["save_audio"],
+    )
 
     model = Vocoder(VocoderConfig())
 
@@ -35,7 +37,8 @@ def main(index):
     metrics = Metrics(
         dev,
         collator,
-        save_audio=lco["evaluation"]["save_audio"]
+        save_audio=lco["evaluation"]["save_audio"],
+        batch_size=lco["evaluation"]["batch_size"],
     )
 
     trainer = Trainer(

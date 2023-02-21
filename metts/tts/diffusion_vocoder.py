@@ -185,7 +185,7 @@ class DiffWaveSampler():
         self.model = model
         self.diff_params = diff_params
 
-    def __call__(self, c, N=4):
+    def __call__(self, c, N=4, bs=1):
         if N not in self.noise_schedules:
             raise ValueError(f"Invalid noise schedule length {N}")
 
@@ -195,17 +195,18 @@ class DiffWaveSampler():
             noise_schedule = torch.FloatTensor(noise_schedule)
 
         noise_schedule = noise_schedule.to(c.device)
+        noise_schedule = noise_schedule.to(torch.float32)
 
         audio_length = c.shape[-1] * lco["audio"]["hop_length"]
 
         pred_wav = self.sampling_given_noise_schedule(
-            (1, audio_length),
+            (bs, audio_length),
             noise_schedule,
             c,
         )
 
-        pred_wav = pred_wav / pred_wav.abs().max()
-        pred_wav = pred_wav.view(-1)
+        pred_wav = pred_wav / max(pred_wav.abs().max(), 1e-5)
+        #pred_wav = pred_wav.view(-1)
         return pred_wav
 
     def sampling_given_noise_schedule(
@@ -235,13 +236,16 @@ class DiffWaveSampler():
 
         N = len(noise_schedule)
         beta_infer = noise_schedule
-        alpha_infer = 1 - beta_infer
+        alpha_infer = [1 - float(x) for x in beta_infer] 
         sigma_infer = beta_infer + 0
+
         for n in range(1, N):
             alpha_infer[n] *= alpha_infer[n - 1]
             sigma_infer[n] *= (1 - alpha_infer[n - 1]) / (1 - alpha_infer[n])
-        alpha_infer = torch.sqrt(alpha_infer)
+        alpha_infer = torch.FloatTensor([np.sqrt(x) for x in alpha_infer])
         sigma_infer = torch.sqrt(sigma_infer)
+
+        torch.set_printoptions(precision=10)
 
         # Mapping noise scales to time steps
         steps_infer = []
@@ -263,6 +267,7 @@ class DiffWaveSampler():
                 if n > 0:
                     z = torch.normal(0, 1, size=size).to(c.device)
                     x = x + sigma_infer[n] * z
+
         return x
 
     def map_noise_scale_to_time_step(self, alpha_infer, alpha):
@@ -303,10 +308,11 @@ class Vocoder(PreTrainedModel):
             htk=True,
             fmin=0,
             fmax=8000,
-            trainable_mel=lco["vocoder"]["learnable_mel"],
-            trainable_STFT=True,
+            trainable_mel=lco["diffusion_vocoder"]["learnable_mel"],
+            trainable_STFT=lco["diffusion_vocoder"]["learnable_mel"],
         )
         self.diff_params = DiffWave.compute_diffusion_params(noise_schedule)
+        self.sampler = DiffWaveSampler(self.diffusion_vocoder, self.diff_params)
 
     @staticmethod
     def drc(x, C=1, clip_val=1e-5, log10=True):
@@ -316,15 +322,18 @@ class Vocoder(PreTrainedModel):
         else:
             return torch.log(torch.clamp(x, min=clip_val) * C)
 
-    def forward(self, audio, **kwargs):
-        batch_size = audio.shape[0]
+    def create_mel(self, audio):
         mel = Vocoder.drc(self.mel(audio))
         mel_size = lco["max_lengths"]["vocoder"]
         if mel.shape[2] > mel_size:
             mel = mel[:, :, :mel_size]
         elif mel.shape[2] < mel_size:
             mel = F.pad(mel, (0, mel_size - mel.shape[2]), "constant", 0)
+        return mel
 
+    def forward(self, audio, **kwargs):
+        batch_size = audio.shape[0]
+        mel = self.create_mel(audio)
         c = mel
         ts = torch.randint(low=0, high=lco["diffusion_vocoder"]["T"], size=(batch_size, 1))
         noise_scales = self.diff_params["alpha"].to(mel.device)[ts]
@@ -338,9 +347,5 @@ class Vocoder(PreTrainedModel):
             "logits": e,
         }
 
-    def generate(self, mel, n):
-        sampler = DiffWaveSampler(self.diffusion_vocoder, self.diff_params)
-
-        audio = sampler(mel, n)
-        
-        return audio
+    def generate(self, mel, n, bs=1):
+        return self.sampler(mel, n, bs)

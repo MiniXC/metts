@@ -315,7 +315,6 @@ class VocoderCollator():
         include_audio=False,
     ):
         self.sampling_rate = lco["audio"]["sampling_rate"]
-
         self.include_audio = include_audio
 
     @staticmethod
