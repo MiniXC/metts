@@ -13,7 +13,7 @@ import numpy as np
 import scipy.io.wavfile as wf
 
 class Metrics():
-    def __init__(self, dataset, collator, num_examples=4, batch_size=1, save_audio=True):
+    def __init__(self, dataset, collator, num_examples=1, batch_size=1, save_audio=True):
         self.dataset = dataset
         self.num_examples = num_examples
         
@@ -104,7 +104,7 @@ class Metrics():
             save_path.mkdir(exist_ok=True, parents=True)
 
         for i, batch in enumerate(self.loader):
-            if i >= prc_index:
+            if i >= prc_index * self.num_examples:
                 audio_true = batch["full_audio"]
                 # pad to multiple of chunk_size * hop_length
                 multiple_of = (audio_true.shape[1] // (self.chunk_size * self.hop_length))
@@ -123,7 +123,7 @@ class Metrics():
                 audio_trues.append(audio_true.cpu().detach().numpy())
                 if self.save_audio:
                     wf.write(
-                        save_path / f"{i}.wav",
+                        save_path / f"{i}_.wav",
                         lco["audio"]["sampling_rate"],
                         audio_pred.cpu().detach().numpy().flatten(),
                     )

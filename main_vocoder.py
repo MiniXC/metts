@@ -12,7 +12,7 @@ from transformers.trainer import TrainingArguments
 from transformers import HfArgumentParser
 from datasets import load_dataset
 
-TRAIN = True
+TRAIN = False
 
 def main(index):
     training_args = HfArgumentParser(TrainingArguments).parse_json_file("config/trainer.json")[0]
@@ -27,9 +27,9 @@ def main(index):
     
     collator = VocoderCollator()
 
-    model = Vocoder(VocoderConfig())
+    #model = Vocoder(VocoderConfig())
 
-    #model = Vocoder.from_pretrained("output/checkpoint-74460")
+    model = Vocoder.from_pretrained("models/DiffWave-1k-Lmel-325k")
     #model = model.to(dtype=torch.bfloat16)
 
     metrics = Metrics(

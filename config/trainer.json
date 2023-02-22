@@ -13,6 +13,6 @@
     "save_strategy": "steps",
     "eval_steps": 20000,
     "save_steps": 20000,
-    "bf16": true,
-    "bf16_full_eval": true
+    "bf16": false,
+    "bf16_full_eval": false
 }
