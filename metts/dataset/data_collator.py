@@ -6,6 +6,7 @@ import json
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 from torch.nn import ConstantPad1d, ConstantPad2d
 import torchaudio
@@ -73,8 +74,6 @@ class MeTTSCollator():
             htk=True,
             fmin=0,
             fmax=8000,
-            # trainable_mel=True,
-            # trainable_STFT=True,
         )
 
         self.include_audio = include_audio
@@ -83,10 +82,10 @@ class MeTTSCollator():
         self.keys = keys
 
     @staticmethod
-    def drc(x, C=1, clip_val=1e-1, log10=True):
+    def drc(x, C=1, clip_val=1e-5, log10=True):
         """Dynamic Range Compression"""
         if log10:
-            return torch.log10(torch.clamp(x, min=clip_val) * C)
+            return torch.log10(torch.clamp(x, min=clip_val) * C) / 5
         else:
             return torch.log(torch.clamp(x, min=clip_val) * C)
         
@@ -109,6 +108,15 @@ class MeTTSCollator():
         audio_stds = []
         mel_means = []
         mel_stds = []
+
+        audio_torch, sr = torchaudio.load(batch[0]["audio"]["path"])
+        audio_hf = batch[0]["audio"]["array"]
+
+        # print("audio_torch", audio_torch.shape, audio_torch.dtype, audio_torch.min(), audio_torch.max())
+        # print("audio_hf", audio_hf.shape, audio_hf.dtype, audio_hf.min(), audio_hf.max())
+
+        # raise
+
         for i, row in enumerate(batch):
             phones = row["phones"]
             batch[i]["phones"] = np.array([self.phone2idx[phone.replace("ˌ", "")] for phone in row["phones"]])
@@ -121,12 +129,13 @@ class MeTTSCollator():
             audio_stds.append(audio.std())
 
             # normalize audio
-            audio = (audio - audio.mean()) / audio.std()
+            # audio = (audio - audio.mean()) / audio.std()
             
             # compute mel spectrogram
             mel = MeTTSCollator.drc(self.mel(torch.tensor(audio).unsqueeze(0)))
             mel_means.append(mel.mean().item())
             mel_stds.append(mel.std().item())
+            # print(mel.shape, mel.mean(), mel.std(), mel.min(), mel.max(), "mel")
             batch[i]["mel"] = ((mel - mel.mean()) / mel.std())[0].T
 
             durations = np.array(row["phone_durations"])
@@ -325,7 +334,6 @@ class VocoderCollator():
         else:
             return torch.log(torch.clamp(x, min=clip_val) * C)
         
-    
     def collate_fn(self, batch):
         result = {}
 
@@ -333,25 +341,31 @@ class VocoderCollator():
         hop_length = lco["audio"]["hop_length"]
 
         full_audios = []
+        audios = []
 
         for i, row in enumerate(batch):
-            sr = self.sampling_rate
+            sr = lco["audio"]["sampling_rate"]
             start = int(sr * row["start"])
             end = int(sr * row["end"])
-            audio = row["audio"]["array"]
-            audio = audio[start:end]
+            audio, _sr = torchaudio.load(row["audio"])
+            # resample
+            if _sr != sr:
+                if not hasattr(self, "_resampler"):
+                    self._resampler = torchaudio.transforms.Resample(_sr, sr)
+                audio = self._resampler(audio)
+            audio = audio[0][start:end]
 
             # normalize audio
             audio = (audio - audio.mean()) / audio.std()
 
-            if self.include_audio:
-                full_audios.append(audio)
-
+            # if self.include_audio:
+            #     full_audios.append(audio)
             
             # get random chunk of audio
             audio_length = audio.shape[0]
             if (audio_length/hop_length)-chunk_length <= 0:
-                audio = np.pad(audio, (0, chunk_length*hop_length-audio_length), mode="constant")
+                # pad by chunk_length*hop_length-audio_length using torch
+                audio = torch.nn.functional.pad(audio, (0, int(chunk_length*hop_length-audio_length)))
             else:
                 if (audio_length//hop_length)-chunk_length <= 0:
                     start = 0
@@ -359,12 +373,11 @@ class VocoderCollator():
                     start = np.random.randint(0, (audio_length//hop_length)-chunk_length)
                 audio = audio[start*hop_length:(start+chunk_length)*hop_length]
 
+            audios.append(audio)
 
-            batch[i]["audio"]["array"] = audio
+        result["audio"] = torch.tensor(np.stack(audios))
 
-        result["audio"] = torch.tensor(np.stack([x["audio"]["array"] for x in batch]))
-
-        if self.include_audio:
-            result["full_audio"] = torch.tensor(np.stack(full_audios))
+        # if self.include_audio:
+        #     result["full_audio"] = torch.tensor(np.stack(full_audios))
 
         return result

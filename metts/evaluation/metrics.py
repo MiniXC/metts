@@ -2,6 +2,7 @@ from torch.utils.data import DataLoader
 import lco
 import torchaudio
 from mel_cepstral_distance import get_metrics_wavs
+from metts.dataset.data_collator import VocoderCollator
 from copy import deepcopy
 import torch
 from pathlib import Path
@@ -15,13 +16,9 @@ from tqdm.auto import tqdm
 import os
 
 class Metrics():
-    def __init__(self, dataset, collator, num_examples=4, batch_size=1, save_audio=True):
+    def __init__(self, dataset, collator, num_examples=4, batch_size=1):
         self.dataset = dataset
         self.num_examples = num_examples
-        
-        collator = deepcopy(collator)
-        if save_audio:
-            collator.include_audio = True
 
         self.loader = DataLoader(
             dataset=dataset,
@@ -32,7 +29,7 @@ class Metrics():
             drop_last=True,
         )
 
-        self.save_audio = save_audio
+        self.save_audio = False
         self.batch_size = batch_size
         self.chunk_size = lco["evaluation"]["chunk_size"]
         self.hop_length = lco["audio"]["hop_length"]
@@ -77,9 +74,12 @@ class Metrics():
         pesq_val = 0
         count = 0
         for audio_pred, audio_true in zip(audio_preds, audio_trues):
-            metric = pesq(16_000, audio_true.flatten(), audio_pred.flatten(), "wb")
-            pesq_val += metric
-            count += 1
+            try:
+                metric = pesq(16_000, audio_true.flatten(), audio_pred.flatten(), "wb")
+                pesq_val += metric
+                count += 1
+            except:
+                print("PESQ failed")
         pesq_val /= count
         return pesq_val
 

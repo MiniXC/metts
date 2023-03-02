@@ -322,24 +322,15 @@ class Vocoder(PreTrainedModel):
         else:
             return torch.log(torch.clamp(x, min=clip_val) * C)
 
-    def create_mel(self, audio):
-        mel = Vocoder.drc(self.mel(audio))
-        mel_size = lco["max_lengths"]["vocoder"]
-        if mel.shape[2] > mel_size:
-            mel = mel[:, :, :mel_size]
-        elif mel.shape[2] < mel_size:
-            mel = F.pad(mel, (0, mel_size - mel.shape[2]), "constant", 0)
-        return mel
-
-    def forward(self, audio, **kwargs):
+    def forward(self, vocoder_mel, vocoder_audio, **kwargs):
+        audio = vocoder_audio
         batch_size = audio.shape[0]
-        mel = self.create_mel(audio)
-        c = mel
+        c = vocoder_mel
         ts = torch.randint(low=0, high=lco["diffusion_vocoder"]["T"], size=(batch_size, 1))
-        noise_scales = self.diff_params["alpha"].to(mel.device)[ts]
-        z = torch.normal(0, 1, size=audio.shape).to(mel.device)
+        noise_scales = self.diff_params["alpha"].to(c.device)[ts]
+        z = torch.normal(0, 1, size=audio.shape).to(c.device)
         noisy_audios = noise_scales * audio + (1 - noise_scales**2.).sqrt() * z
-        e = self.diffusion_vocoder(noisy_audios, c, ts.to(mel.device))
+        e = self.diffusion_vocoder(noisy_audios, c, ts.to(c.device))
         loss = nn.MSELoss()(e, z)
 
         return {

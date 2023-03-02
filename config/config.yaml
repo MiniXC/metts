@@ -23,8 +23,8 @@ diffusion_vocoder:
   learnable_mel: False
 meta: [duration, mel, audio, energy, pitch, srmr, snr]
 evaluation:
-  sampling_T: 8
+  sampling_T: 4
   num_workers: 8
-  chunk_size: 64
+  chunk_size: 128
   save_audio: False
   batch_size: 16
