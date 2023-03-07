@@ -97,7 +97,7 @@ class MeTTS(datasets.GeneratorBasedBuilder):
             "phones": datasets.Sequence(datasets.Value("string")),
             "phone_durations": datasets.Sequence(datasets.Value("int32")),
             # audio feature
-            "audio": datasets.Audio(sampling_rate=self.config.sampling_rate),
+            "audio": datasets.Value("string") # datasets.Audio(sampling_rate=self.config.sampling_rate),
         }
 
         return datasets.DatasetInfo(

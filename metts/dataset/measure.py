@@ -97,7 +97,7 @@ class EnergyMeasure(Measure):
             y=audio,
             frame_length=self.win_length,
             hop_length=self.hop_length,
-            center=False,
+            center=True,
         ).astype(np.float32)
         energy = energy.reshape(-1)
         if sum(durations) < len(energy):

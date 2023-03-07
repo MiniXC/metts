@@ -48,10 +48,10 @@ def plot_batch(batch):
     plt.xlabel("Time (s)")
     return fig
 
-def plot_batch_meta(batch, meta_key, array_key):
+def plot_batch_meta(batch, array_key):
     fig = plt.figure(figsize=(20, 10))
-    batch_size = batch["audio"].shape[0]
-    if meta_key == "duration":
+    batch_size = batch["mel"].shape[0]
+    if array_key == "duration":
         audio_length = batch[array_key].shape[1] - 1
         df_dict = {
             "x": np.tile(np.arange(audio_length), batch_size),
@@ -60,7 +60,7 @@ def plot_batch_meta(batch, meta_key, array_key):
         }
         xlabel = "Phones"
     else:
-        audio_length = batch["audio"].shape[1]/lco["audio"]["hop_length"]
+        audio_length = batch["mel"].shape[1]
         df_dict = {
             "x": np.tile(np.arange(audio_length*lco["audio"]["hop_length"], step=lco["audio"]["hop_length"]), batch_size)/lco["audio"]["sampling_rate"],
             "y": batch["measures"][array_key].flatten().numpy()+1,

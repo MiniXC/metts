@@ -22,6 +22,15 @@ diffusion_vocoder:
   dilation_cycle_length: 10
   learnable_mel: False
 meta: [duration, mel, audio, energy, pitch, srmr, snr]
+consistency:
+  nlayers: 6
+  in_channels: 80
+  filter_size: 256
+  kernel_size: 3
+  dropout: 0.1
+  depthwise: True
+  transformer_layers: 4
+  measures: [energy, pitch, srmr, snr]
 evaluation:
   sampling_T: 4
   num_workers: 8

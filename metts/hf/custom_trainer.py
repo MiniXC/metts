@@ -840,6 +840,7 @@ class Trainer:
                     drop_last=self.args.dataloader_drop_last,
                     num_processes=self.args.world_size,
                     process_index=self.args.process_index,
+                    prefetch_factor=500,
                 )
 
             return DataLoader(
@@ -848,6 +849,7 @@ class Trainer:
                 collate_fn=data_collator,
                 num_workers=self.args.dataloader_num_workers,
                 pin_memory=self.args.dataloader_pin_memory,
+                prefetch_factor=500,
             )
 
         train_sampler = self._get_train_sampler()
@@ -861,6 +863,7 @@ class Trainer:
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.dataloader_pin_memory,
             worker_init_fn=seed_worker,
+            prefetch_factor=500,
         )
 
     def _get_eval_sampler(self, eval_dataset: Dataset) -> Optional[torch.utils.data.Sampler]:
@@ -921,6 +924,7 @@ class Trainer:
                     drop_last=self.args.dataloader_drop_last,
                     num_processes=self.args.world_size,
                     process_index=self.args.process_index,
+                    prefetch_factor=500,
                 )
             return DataLoader(
                 eval_dataset,
@@ -928,6 +932,7 @@ class Trainer:
                 collate_fn=data_collator,
                 num_workers=self.args.dataloader_num_workers,
                 pin_memory=self.args.dataloader_pin_memory,
+                prefetch_factor=500,
             )
 
         eval_sampler = self._get_eval_sampler(eval_dataset)
@@ -940,6 +945,7 @@ class Trainer:
             drop_last=self.args.dataloader_drop_last,
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.dataloader_pin_memory,
+            prefetch_factor=500,
         )
 
     def get_test_dataloader(self, test_dataset: Dataset) -> DataLoader:
@@ -968,6 +974,7 @@ class Trainer:
                     drop_last=self.args.dataloader_drop_last,
                     num_processes=self.args.world_size,
                     process_index=self.args.process_index,
+                    prefetch_factor=500,
                 )
             return DataLoader(
                 test_dataset,
@@ -975,6 +982,7 @@ class Trainer:
                 collate_fn=data_collator,
                 num_workers=self.args.dataloader_num_workers,
                 pin_memory=self.args.dataloader_pin_memory,
+                prefetch_factor=500,
             )
 
         test_sampler = self._get_eval_sampler(test_dataset)
@@ -988,6 +996,7 @@ class Trainer:
             drop_last=self.args.dataloader_drop_last,
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.dataloader_pin_memory,
+            prefetch_factor=500,
         )
 
     def create_optimizer_and_scheduler(self, num_training_steps: int):

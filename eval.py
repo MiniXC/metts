@@ -7,49 +7,77 @@ from datasets import load_dataset
 import torch
 from torch.utils.data import DataLoader
 from matplotlib import pyplot as plt
+import seaborn as sns
+import pandas as pd
 from librosa.feature.inverse import mel_to_audio
 import torchaudio
+from tqdm.auto import tqdm
 
 from metts.dataset.data_collator import MeTTSCollator
 from metts.tts.model import MeTTS
-from metts.dataset.plotting import plot_item
+# from metts.dataset.plotting import plot_item, plot_batch_meta
+from metts.dataset.measure import PitchMeasure, EnergyMeasure, SRMRMeasure, SNRMeasure
 
+from metts.tts.consistency_predictor import ConsistencyPredictor, ConformerConsistencyPredictor
 
+import time
 
-model = MeTTS.from_pretrained("output/checkpoint-60000")
-model.eval()
+# model = MeTTS.from_pretrained("output/checkpoint-60000")
+# model.eval()
 
 eval_data = load_dataset("metts/dataset/dataset.py", "libritts", split="dev")
 
 speaker2idx = json.load(open("data/speaker2idx.json"))
 phone2idx = json.load(open("data/phone2idx.json"))
+measure_stats = json.load(open("data/measure_stats.json"))
 idx2phone = {v: k for k, v in phone2idx.items()}
 
 collator = MeTTSCollator(
     speaker2idx=speaker2idx,
     phone2idx=phone2idx,
+    measure_stats=measure_stats,
+    keys=["mel", "measures"],
+    measures=[PitchMeasure(), EnergyMeasure(), SRMRMeasure(), SNRMeasure()],
 )
 
 dl = DataLoader(
     eval_data,
-    batch_size=1,
+    batch_size=16,
     collate_fn=collator.collate_fn,
+    shuffle=False,
 )
 
+model = ConformerConsistencyPredictor.from_pretrained("output/checkpoint-24000")
+# eval
+model.eval()
 
-for i, item in enumerate(dl):
-    y = model.generate(item["phones"], item["phone_durations"], item["val_ind"], item["audio"]).detach()
-    # fig = plot_item(
-    #     item["audio"][0], 
-    #     item["phones"][0],
-    #     item["phone_durations"][0],
-    #     eval_data[i]["text"],
-    #     eval_data[i]["audio"]["path"],
-    #     idx2phone,
-    #     y
-    # ) 
-    print(y.shape)
-    torchaudio.save("test_eval.wav", y.unsqueeze(0), lco["audio"]["sampling_rate"])
-    #plt.imshow(y[0], aspect="auto", origin="lower", interpolation="none")
-    plt.savefig("test_eval.png")
-    break
+measure_order = ["energy", "pitch", "srmr", "snr"]
+
+loss_dicts = []
+
+for i, item in tqdm(enumerate(dl)):
+    result = model(item["mel"], item["measures"])
+    # plot predicted measures against ground truth and save to file
+    # first we construct a dataframe, then we create one plot per measure (inkl. ground truth and predicted)
+    # then we save the plot to a file
+    df = pd.DataFrame()
+    j = 0
+    for k, measure in enumerate(measure_order):
+        df[f"{measure}_y_{j}"] = item["measures"][measure][j].numpy().tolist() + result["logits"][j][k].detach().cpu().numpy().tolist()
+        df[f"{measure}_x_{j}"] = list(range(len(item["measures"][measure][j]))) + list(range(len(item["measures"][measure][j])))
+        df[f"{measure}_type_{j}"] = ["ground truth"] * len(item["measures"][measure][j]) + ["predicted"] * len(item["measures"][measure][j])
+    # plot first element in batch for each measure as lineplot and save to file
+    if i == 0:
+        for measure in measure_order:
+            sns.lineplot(data=df, x=f"{measure}_x_0", y=f"{measure}_y_0", hue=f"{measure}_type_0")
+            # add mel spectrogram with extent (in grayscale)
+            plt.imshow(item["mel"][0].detach().cpu().numpy().T, aspect="auto", origin="lower", extent=[0, len(item["mel"][0]), df[f"{measure}_y_0"].min(), df[f"{measure}_y_0"].max()], cmap="gray")
+            plt.savefig(f"examples/{i}_{measure}.png")
+            plt.clf()
+    loss_dicts.append(result["loss_dict"])
+    if i >= 10:
+        break
+
+for measure in measure_order:
+    loss = sum([loss_dict[measure] for loss_dict in loss_dicts])
+    print(f"{measure}: {loss / len(loss_dicts)}")
