@@ -59,8 +59,8 @@ def main(index):
         measures=[PitchMeasure(), EnergyMeasure(), SRMRMeasure(), SNRMeasure()],
     )
 
-    model = ConformerConsistencyPredictor(ConsistencyPredictorConfig())
-    #model = ConsistencyPredictor.from_pretrained("output/checkpoint-25000")
+    #model = ConsistencyPredictor(ConsistencyPredictorConfig())
+    model = ConformerConsistencyPredictor.from_pretrained("output/checkpoint-24000")
 
     trainer = Trainer(
         model,

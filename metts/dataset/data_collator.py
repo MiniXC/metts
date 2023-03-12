@@ -124,8 +124,8 @@ class MeTTSCollator():
     def collate_fn(self, batch):
         result = {}
 
-        #audio_torch, sr = torchaudio.load(batch[0]["audio"]["path"])
-        #audio_hf = batch[0]["audio"]["array"]
+        # audio_torch, sr = torchaudio.load(batch[0]["audio"]["path"])
+        # audio_hf = batch[0]["audio"]["array"]
 
         # print("audio_torch", audio_torch.shape, audio_torch.dtype, audio_torch.min(), audio_torch.max())
         # print("audio_hf", audio_hf.shape, audio_hf.dtype, audio_hf.min(), audio_hf.max())
@@ -144,15 +144,6 @@ class MeTTSCollator():
             audio = audio
             audio = audio[start:end]
             audio = audio / np.abs(audio).max()
-
-            # compute mel spectrogram
-            mel = self.mel_spectrogram(torch.tensor(audio).unsqueeze(0))
-            mel = torch.sqrt(mel[0])
-            mel = torch.matmul(self.mel_basis, mel)
-            mel = MeTTSCollator.drc(mel)
-            mel = (mel - self.measure_stats["mel"]["mean"][0]) / self.measure_stats["mel"]["std"][0]
-
-            batch[i]["mel"] = mel.T
 
             durations = np.array(row["phone_durations"])
 
@@ -174,25 +165,34 @@ class MeTTSCollator():
             duration_mask_rm = durations[duration_permutation].cumsum() >= self.max_frame_length
             duration_mask_rm = duration_mask_rm[np.argsort(duration_permutation)]
             batch[i]["phones"][duration_mask_rm] = self.phone2idx["MASK"]
-            duration_mask_rm_exp = np.repeat(duration_mask_rm, durations * 256)
-            duration_mask_rm_exp_frame = np.repeat(duration_mask_rm, durations)
+            duration_mask_rm_exp = np.repeat(duration_mask_rm, durations * lco["audio"]["hop_length"])
+            dur_sum = sum(durations)
             self.num_total += 1
             self.num_masked += 1 if sum(duration_mask_rm) > 0 else 0
             self.percentage_mask_tokens += sum(duration_mask_rm_exp) / len(duration_mask_rm_exp)
             durations[duration_mask_rm] = 0
             batch[i]["audio"] = audio[~duration_mask_rm_exp]
-            if batch[i]["mel"].shape[0] > duration_mask_rm_exp_frame.shape[0]:
-                batch[i]["mel"] = batch[i]["mel"][:duration_mask_rm_exp_frame.shape[0]]
-            if batch[i]["mel"].shape[0] < duration_mask_rm_exp_frame.shape[0]:
+            new_mel_len = int(np.ceil(len(batch[i]["audio"]) / lco["audio"]["hop_length"]))
+            # compute mel spectrogram
+            mel = self.mel_spectrogram(torch.tensor(audio).unsqueeze(0))
+            mel = torch.sqrt(mel[0])
+            mel = torch.matmul(self.mel_basis, mel)
+            mel = MeTTSCollator.drc(mel)
+            # mel = (mel - self.measure_stats["mel"]["mean"][0]) / self.measure_stats["mel"]["std"][0]
+
+            batch[i]["mel"] = mel.T
+            if batch[i]["mel"].shape[0] > new_mel_len:
+                batch[i]["mel"] = batch[i]["mel"][:new_mel_len]
+            if batch[i]["mel"].shape[0] < new_mel_len:
                 batch[i]["mel"] = torch.cat([batch[i]["mel"], torch.zeros(1, batch[i]["mel"].shape[1])])
             
-            batch[i]["mel"] = batch[i]["mel"][~duration_mask_rm_exp_frame]
-            dur_sum = sum(durations)
+            # batch[i]["mel"] = batch[i]["mel"][~duration_mask_rm_exp_frame]
+            
             unexpanded_silence_mask = ["[" in p for p in phones]
             silence_mask = self._expand(unexpanded_silence_mask, durations)
             batch[i]["phone_durations"] = durations.copy()
             durations = durations + (np.random.rand(*durations.shape) - 0.5)
-            durations = (durations - self.measure_stats["duration"]["mean"][0]) / self.measure_stats["duration"]["std"][0]
+            durations = (durations - self.measure_stats["duration"]["mean"]) / self.measure_stats["duration"]["std"]
             batch[i]["durations"] = durations
             if self.measures is not None:
                 measure_paths = {
@@ -206,11 +206,11 @@ class MeTTSCollator():
                             measures[measure.name] = pickle.load(f)
                 else:
                     measure_dict = {
-                        measure.name: measure(audio, row["phone_durations"], silence_mask, True)
+                        measure.name: measure(batch[i]["audio"], row["phone_durations"], silence_mask, True)
                         for measure in self.measures
                     }
                     measures = {
-                        key: (value["measure"] - self.measure_stats[key]["mean"][0]) / self.measure_stats[key]["std"][0]
+                        key: (value["measure"] - self.measure_stats[key]["mean"]) / self.measure_stats[key]["std"]
                         for key, value in measure_dict.items()
                     }
                     for measure in self.measures:
@@ -273,6 +273,7 @@ class MeTTSCollator():
         result["audio"] = pad_sequence([x["audio"] for x in batch], batch_first=True)
         result["mel"] = pad_sequence([x["mel"] for x in batch], batch_first=True)
         result["phone_durations"] = pad_sequence([x["phone_durations"] for x in batch], batch_first=True)
+        result["durations"] = [x["durations"] for x in batch]
         result["durations"] = pad_sequence([x["durations"] for x in batch], batch_first=True)
         result["phones"] = pad_sequence([x["phones"] for x in batch], batch_first=True)
         speakers = [str(x["speaker"]).split("/")[-1] if ("/" in str(x["speaker"])) else x["speaker"] for x in batch]
@@ -280,13 +281,14 @@ class MeTTSCollator():
         result["speaker"] = torch.tensor([self.speaker2idx[x] for x in speakers])
         result["measures"] = {}
 
-        result["vocoder_mask"] = torch.zeros((max_frame_length))
-        result["vocoder_mask"][random_min_frame_length:lco["max_lengths"]["vocoder"]+random_min_frame_length] = 1
-        result["vocoder_mask"] = result["vocoder_mask"].bool()
-        audio_min_idx = random_min_frame_length*lco["audio"]["hop_length"]
-        audio_max_idx = (lco["max_lengths"]["vocoder"]+random_min_frame_length)*lco["audio"]["hop_length"]
-        result["vocoder_audio"] = result["audio"][:,audio_min_idx:audio_max_idx]
-        result["vocoder_mel"] = result["mel"].transpose(1,2)[:, :, result["vocoder_mask"]]
+        # NOT WORKING DUE TO MEL COMP CHANGE
+        # result["vocoder_mask"] = torch.zeros((max_frame_length))
+        # result["vocoder_mask"][random_min_frame_length:lco["max_lengths"]["vocoder"]+random_min_frame_length] = 1
+        # result["vocoder_mask"] = result["vocoder_mask"].bool()
+        # audio_min_idx = random_min_frame_length*lco["audio"]["hop_length"]
+        # audio_max_idx = (lco["max_lengths"]["vocoder"]+random_min_frame_length)*lco["audio"]["hop_length"]
+        # result["vocoder_audio"] = result["audio"][:,audio_min_idx:audio_max_idx]
+        # result["vocoder_mel"] = result["mel"].transpose(1,2)[:, :, result["vocoder_mask"]]
 
         if not self.include_audio:
             del result["audio"]

@@ -4,14 +4,15 @@
     "per_device_eval_batch_size": 64,
     "learning_rate": 5e-4,
     "warmup_ratio": 0.001,
-    "report_to": "wandb",
+    "report_to": "none",
     "max_steps": 25000,
-    "run_name": "conformer4layer_consistency",
-    "dataloader_num_workers": 16,
+    "run_name": "conformer4layer_consistency_final_cont",
+    "dataloader_num_workers": 0,
     "dataloader_pin_memory": true,
     "remove_unused_columns": false,
     "evaluation_strategy": "steps",
     "save_strategy": "steps",
     "eval_steps": 2000,
-    "save_steps": 2000
+    "save_steps": 2000,
+    "logging_steps": 100
 }

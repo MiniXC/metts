@@ -5,11 +5,11 @@ import numpy as np
 import pyworld as pw
 import librosa
 import torch
-from srmrpy import SRMR
 from scipy import interpolate
 import lco
 
-from .snr import SNR
+from .snr import wada_snr
+from .srmr import srmr
 
 class Measure(ABC):
     def __init__(self, name, description):
@@ -55,7 +55,7 @@ class PitchMeasure(Measure):
         description="Pitch measure",
         sampling_rate=22050,
         hop_length=256,
-        pitch_quality=0.25
+        pitch_quality=1
     ):
         global pw
         super().__init__(name, description)
@@ -64,20 +64,23 @@ class PitchMeasure(Measure):
         self.dio_speed = int(np.round(1 / pitch_quality))
 
     def compute(self, audio, durations, silence_mask=None):
-        pitch, t = pw.dio(
+        # pitch_overall = librosa.yin(audio, fmin=64, fmax=8000)
+        # pitch_overall = np.nanmean(pitch_overall)
+        # pitch_overall = librosa.hz_to_midi(pitch_overall)
+        f0, t = pw.dio(
             audio.astype(np.float64),
             self.sampling_rate,
             frame_period=self.hop_length / self.sampling_rate * 1000,
             speed=self.dio_speed,
         )
-        pitch = pw.stonemask(audio.astype(np.float64), pitch, t, self.sampling_rate).astype(np.float32)
-        pitch[pitch == 0] = np.nan
+        pitch = pw.stonemask(audio.astype(np.float64), f0, t, self.sampling_rate).astype(np.float32)
+        # pitch[pitch == 0] = np.nan
         if sum(durations) < len(pitch):
             pitch = pitch[:sum(durations)]
-        if silence_mask is not None:
-            pitch[silence_mask] = np.nan
-        if np.isnan(pitch).all():
-            pitch[:] = 1e-6
+        # if silence_mask is not None:
+        #     pitch[silence_mask] = np.nan
+        # if np.isnan(pitch).all():
+        #     pitch[:] = 1e-6
         return pitch
 
 class EnergyMeasure(Measure):
@@ -93,6 +96,7 @@ class EnergyMeasure(Measure):
         self.hop_length = hop_length
 
     def compute(self, audio, durations, silence_mask=None):
+        energy_overall = np.sum(audio ** 2) / len(audio)
         energy = librosa.feature.rms(
             y=audio,
             frame_length=self.win_length,
@@ -112,16 +116,12 @@ class SRMRMeasure(Measure):
         sampling_rate=22050,
     ):
         super().__init__(name, description)
-        self.srmr = SRMR(fs=sampling_rate, faster=True, norm=True)
+        self.sampling_rate = sampling_rate
+        self.srmr = srmr
 
     def compute(self, audio, durations, silence_mask=None):
-        _, frame_srmr = self.srmr.srmr(torch.tensor(audio))
-        if len(frame_srmr) == 1:
-            srmr = np.repeat(frame_srmr, sum(durations))
-        else:
-            f = interpolate.interp1d(np.linspace(0,1,len(frame_srmr)), frame_srmr)
-            srmr = f(np.linspace(0,1,sum(durations)))
-        return srmr
+        srmr, srmr_t = self.srmr(audio, self.sampling_rate, fast=False, norm=True)
+        return srmr_t
 
 class SNRMeasure(Measure):
     def __init__(
@@ -138,12 +138,5 @@ class SNRMeasure(Measure):
         self.hop_length = hop_length
 
     def compute(self, audio, durations, silence_mask=None):
-        snr = SNR(audio.astype(np.float32), self.sampling_rate)
-        snr = snr.windowed_wada(window=self.win_length, stride=self.hop_length/self.win_length, use_samples=True)
-        if sum(durations) < len(snr):
-            snr = snr[:sum(durations)]
-        if silence_mask is not None:
-            snr[silence_mask] = np.nan
-        if all(np.isnan(snr)):
-            snr[:] = 1e-6
-        return snr
+        snr, snr_t = wada_snr(audio)
+        return snr_t

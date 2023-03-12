@@ -20,7 +20,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer("pe", pe)
 
     def forward(self, x):
-        x = x + self.pe[:, : x.size(1), :].to(x.dtype)
+        x = x + self.pe[:, :x.size(1), :].to(x.dtype)
         return self.dropout(x)
 
 # from https://pytorch.org/docs/1.13/_modules/torch/nn/modules/transformer.html#TransformerEncoder

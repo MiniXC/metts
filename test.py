@@ -7,6 +7,7 @@ from datasets import load_dataset
 from torch.utils.data import DataLoader
 from matplotlib import pyplot as plt
 import lco
+import numpy as np
 
 from metts.dataset.data_collator import MeTTSCollator
 from metts.dataset.measure import PitchMeasure, EnergyMeasure, SRMRMeasure, SNRMeasure
@@ -29,13 +30,14 @@ if __name__ == "__main__":
             SRMRMeasure(),
             SNRMeasure(),
         ],
-        include_audio=True,
+        keys=["mel", "measures", "durations"],
     )
     dev = DataLoader(
         dataset=dev_ds,
         batch_size=8,
         collate_fn=collator.collate_fn,
         num_workers=0,
+        shuffle=True,
     )
 
     m_dict = {
@@ -45,12 +47,21 @@ if __name__ == "__main__":
         k: [] for k in lco["meta"]
     }
 
-    for batch in tqdm(dev):
-        for k in ["pitch", "energy", "srmr", "snr", "duration"]:
-            if k == "duration":
-                array_key = "durations"
-            else:
-                array_key = k
-            fig = plot_batch_meta(batch, k, array_key)
-            plt.savefig(f"examples/{k}.png")
-        break
+    mean_dict = {
+        k: [] for k in ["pitch", "energy", "srmr", "snr", "duration"]
+    }
+
+    std_dict = {
+        k: [] for k in ["pitch", "energy", "srmr", "snr", "duration"]
+    }
+
+    for i, batch in tqdm(enumerate(dev), total=100_000):
+        for k in ["pitch", "energy", "srmr", "snr"]:
+            mean_dict[k].append(np.concatenate(batch["measures"][k]).mean())
+            std_dict[k].append(np.concatenate(batch["measures"][k]).std())
+        mean_dict["duration"].append(np.concatenate(batch["durations"]).mean())
+        std_dict["duration"].append(np.concatenate(batch["durations"]).std())
+        if i % 10:
+            print("==================================")
+            for k in mean_dict:
+                print(k, np.mean(mean_dict[k]), np.mean(std_dict[k]))

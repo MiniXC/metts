@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import DataLoader
 from matplotlib import pyplot as plt
 import seaborn as sns
+sns.set_style('whitegrid', {'legend.frameon':True})
 import pandas as pd
 from librosa.feature.inverse import mel_to_audio
 import torchaudio
@@ -50,29 +51,35 @@ dl = DataLoader(
 model = ConformerConsistencyPredictor.from_pretrained("output/checkpoint-24000")
 # eval
 model.eval()
+# disable dropout
 
 measure_order = ["energy", "pitch", "srmr", "snr"]
 
 loss_dicts = []
 
 for i, item in tqdm(enumerate(dl)):
-    result = model(item["mel"], item["measures"])
+    mel = item["mel"]
+    result = model(mel, item["measures"])
+    # raise
     # plot predicted measures against ground truth and save to file
     # first we construct a dataframe, then we create one plot per measure (inkl. ground truth and predicted)
     # then we save the plot to a file
-    df = pd.DataFrame()
-    j = 0
-    for k, measure in enumerate(measure_order):
-        df[f"{measure}_y_{j}"] = item["measures"][measure][j].numpy().tolist() + result["logits"][j][k].detach().cpu().numpy().tolist()
-        df[f"{measure}_x_{j}"] = list(range(len(item["measures"][measure][j]))) + list(range(len(item["measures"][measure][j])))
-        df[f"{measure}_type_{j}"] = ["ground truth"] * len(item["measures"][measure][j]) + ["predicted"] * len(item["measures"][measure][j])
     # plot first element in batch for each measure as lineplot and save to file
     if i == 0:
+        df = pd.DataFrame()
+        j = 2
+        for k, measure in enumerate(measure_order):
+            df[f"{measure}_y_{j}"] = item["measures"][measure][j].numpy().tolist() + result["logits"][:, k][j].detach().cpu().numpy().tolist()
+            df[f"{measure}_x_{j}"] = list(range(len(item["measures"][measure][j]))) + list(range(len(item["measures"][measure][j])))
+            df[f"{measure}_type_{j}"] = ["ground truth"] * len(item["measures"][measure][j]) + ["predicted"] * len(item["measures"][measure][j])
         for measure in measure_order:
-            sns.lineplot(data=df, x=f"{measure}_x_0", y=f"{measure}_y_0", hue=f"{measure}_type_0")
+            sns.lineplot(data=df, x=f"{measure}_x_{j}", y=f"{measure}_y_{j}", hue=f"{measure}_type_{j}", alpha=0.8)
             # add mel spectrogram with extent (in grayscale)
-            plt.imshow(item["mel"][0].detach().cpu().numpy().T, aspect="auto", origin="lower", extent=[0, len(item["mel"][0]), df[f"{measure}_y_0"].min(), df[f"{measure}_y_0"].max()], cmap="gray")
-            plt.savefig(f"examples/{i}_{measure}.png")
+            plt.imshow(mel[j].detach().cpu().numpy().T, aspect="auto", origin="lower", extent=[0, len(mel[j]), df[f"{measure}_y_{j}"].min(), df[f"{measure}_y_{j}"].max()], cmap="gray", alpha=0.8)
+            legend = plt.legend()
+            frame = legend.get_frame()
+            frame.set_facecolor('white')
+            plt.savefig(f"examples/{j}_{measure}.png")
             plt.clf()
     loss_dicts.append(result["loss_dict"])
     if i >= 10:
