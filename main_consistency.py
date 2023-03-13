@@ -60,7 +60,7 @@ def main(index):
     )
 
     #model = ConsistencyPredictor(ConsistencyPredictorConfig())
-    model = ConformerConsistencyPredictor.from_pretrained("output/checkpoint-24000")
+    model = ConformerConsistencyPredictor.from_pretrained("output/checkpoint-12000")
 
     trainer = Trainer(
         model,

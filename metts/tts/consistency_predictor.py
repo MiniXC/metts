@@ -103,18 +103,19 @@ class ConformerConsistencyPredictor(PreTrainedModel):
             num_layers=lco["consistency"]["transformer_layers"],
         )
 
-        # self.layers = nn.Sequential(
-        #     *[
-        #         VarianceConvolutionLayer(
-        #             filter_size, filter_size, kernel_size, dropout, depthwise
-        #         )
-        #         for _ in range(nlayers)
-        #     ]
-        # )
         self.linear = nn.Sequential(
             nn.Linear(filter_size, filter_size),
             nn.ReLU(),
             nn.Linear(filter_size, num_outputs),
+        )
+
+        # predict sequence-level attributes
+        # d-vector + std and mean for each measure
+        num_attributes = 256 + len(self.measures) * 2
+        self.seq_linear = nn.Sequential(
+            nn.Linear(filter_size, filter_size),
+            nn.ReLU(),
+            nn.Linear(filter_size, num_attributes),
         )
 
     def forward(self, mel, measures=None):
