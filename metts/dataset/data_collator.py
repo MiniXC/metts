@@ -174,11 +174,11 @@ class MeTTSCollator():
             batch[i]["audio"] = audio[~duration_mask_rm_exp]
             new_mel_len = int(np.ceil(len(batch[i]["audio"]) / lco["audio"]["hop_length"]))
             # compute mel spectrogram
-            mel = self.mel_spectrogram(torch.tensor(audio).unsqueeze(0))
+            mel = self.mel_spectrogram(torch.tensor(batch[i]["audio"]).unsqueeze(0))
             mel = torch.sqrt(mel[0])
             mel = torch.matmul(self.mel_basis, mel)
             mel = MeTTSCollator.drc(mel)
-            # mel = (mel - self.measure_stats["mel"]["mean"][0]) / self.measure_stats["mel"]["std"][0]
+            mel = (mel - self.measure_stats["mel"]["mean"]) / self.measure_stats["mel"]["std"]
 
             batch[i]["mel"] = mel.T
             if batch[i]["mel"].shape[0] > new_mel_len:

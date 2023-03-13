@@ -46,9 +46,10 @@ dl = DataLoader(
     batch_size=16,
     collate_fn=collator.collate_fn,
     shuffle=False,
+    num_workers=16,
 )
 
-model = ConformerConsistencyPredictor.from_pretrained("output/checkpoint-24000")
+model = ConformerConsistencyPredictor.from_pretrained("output/checkpoint-12000")
 # eval
 model.eval()
 # disable dropout
@@ -67,7 +68,7 @@ for i, item in tqdm(enumerate(dl)):
     # plot first element in batch for each measure as lineplot and save to file
     if i == 0:
         df = pd.DataFrame()
-        j = 2
+        j = 3
         for k, measure in enumerate(measure_order):
             df[f"{measure}_y_{j}"] = item["measures"][measure][j].numpy().tolist() + result["logits"][:, k][j].detach().cpu().numpy().tolist()
             df[f"{measure}_x_{j}"] = list(range(len(item["measures"][measure][j]))) + list(range(len(item["measures"][measure][j])))
