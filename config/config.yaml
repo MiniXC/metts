@@ -31,9 +31,10 @@ consistency:
   depthwise: True
   transformer_layers: 4
   measures: [energy, pitch, srmr, snr]
+  dvector_dim: 256
 evaluation:
   sampling_T: 4
-  num_workers: 8
+  num_workers: 96
   chunk_size: 128
   save_audio: False
-  batch_size: 16
+  batch_size: 64

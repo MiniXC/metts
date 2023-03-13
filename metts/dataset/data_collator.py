@@ -393,3 +393,195 @@ class VocoderCollator():
         #     result["full_audio"] = torch.tensor(np.stack(full_audios))
 
         return result
+
+class FastSpeechWithConsistencyCollator():
+    def __init__(
+        self,
+        phone2idx,
+        speaker2idx,
+        measure_stats,
+        pad_to_max_length=True,
+        pad_to_multiple_of=None,
+        overwrite_max_length=True,
+        keys=["vocoder_mel", "vocoder_audio"],
+    ):
+        self.sampling_rate = lco["audio"]["sampling_rate"]
+        self.phone2idx = phone2idx
+        self.speaker2idx = speaker2idx
+        self.measure_stats = measure_stats
+        # find max audio length & max duration
+        self.max_frame_length = 0
+        self.max_phone_length = 0
+        self.max_frame_length = lco["max_lengths"]["frame"]
+        self.max_phone_length = lco["max_lengths"]["phone"]
+        self.pad_to_max_length = pad_to_max_length
+        self.pad_to_multiple_of = pad_to_multiple_of
+
+        self.num_masked = 0
+        self.num_total = 0
+        self.percentage_mask_tokens = 0
+
+        self.mel_spectrogram = AT.Spectrogram(
+            n_fft=lco["audio"]["n_fft"],
+            win_length=lco["audio"]["win_length"],
+            hop_length=lco["audio"]["hop_length"],
+            pad=0,
+            window_fn=torch.hann_window,
+            power=2.0,
+            normalized=False,
+            center=True,
+            pad_mode="reflect",
+            onesided=True,
+        )
+        self.mel_basis = librosa_mel(
+            sr=self.sampling_rate,
+            n_fft=lco["audio"]["n_fft"],
+            n_mels=lco["audio"]["n_mels"],
+            fmin=0,
+            fmax=8000,
+        )
+        self.mel_basis = torch.from_numpy(self.mel_basis).float()
+
+        self.overwrite_max_length = overwrite_max_length
+
+        self.keys = keys
+
+    @staticmethod
+    def drc(x, C=1, clip_val=1e-7):
+        return torch.log(torch.clamp(x, min=clip_val) * C)
+        
+    def _expand(self, values, durations):
+        out = []
+        for value, d in zip(values, durations):
+            out += [value] * max(0, int(d))
+        if isinstance(values, list):
+            return np.array(out)
+        elif isinstance(values, torch.Tensor):
+            return torch.stack(out)
+        elif isinstance(values, np.ndarray):
+            return np.array(out)
+    
+    def collate_fn(self, batch):
+        result = {}
+
+        speakers = [
+            str(x["speaker"]).split("/")[-1] 
+            if ("/" in str(x["speaker"])) 
+            else x["speaker"] for x in batch
+        ]
+
+        for i, row in enumerate(batch):
+            phones = row["phones"]
+            batch[i]["phones"] = np.array([self.phone2idx[phone.replace("ˌ", "")] for phone in row["phones"]])
+            sr = self.sampling_rate
+            start = int(sr * row["start"])
+            end = int(sr * row["end"])
+            audio_path = row["audio"]
+            # load audio with librosa
+            audio, sr = librosa.load(audio_path, sr=sr, res_type="kaiser_fast")
+            audio = audio
+            audio = audio[start:end]
+            audio = audio / np.abs(audio).max()
+            durations = np.array(row["phone_durations"])
+            max_audio_len = durations.sum() * lco["audio"]["hop_length"]
+            if len(audio) < max_audio_len:
+                audio = np.pad(audio, (0, max_audio_len - len(audio)))
+            elif len(audio) > max_audio_len:
+                audio = audio[:max_audio_len]
+            """
+            several options (to test later):
+            - remove longest: duration_permutation = np.argsort(durations)
+            - remove random: duration_permutation = np.random.permutation(len(durations))
+            - random hybrid: duration_permutation = np.argsort(durations+np.random.normal(0, durations.std(), len(durations)))
+            """
+            duration_permutation = np.argsort(durations+np.random.normal(0, durations.std(), len(durations)))
+            duration_mask_rm = durations[duration_permutation].cumsum() >= self.max_frame_length
+            duration_mask_rm = duration_mask_rm[np.argsort(duration_permutation)]
+            batch[i]["phones"][duration_mask_rm] = self.phone2idx["MASK"]
+            duration_mask_rm_exp = np.repeat(duration_mask_rm, durations * lco["audio"]["hop_length"])
+            dur_sum = sum(durations)
+            self.num_total += 1
+            self.num_masked += 1 if sum(duration_mask_rm) > 0 else 0
+            self.percentage_mask_tokens += sum(duration_mask_rm_exp) / len(duration_mask_rm_exp)
+            durations[duration_mask_rm] = 0
+            batch[i]["audio"] = audio[~duration_mask_rm_exp]
+            batch[i]["phone_durations"] = durations.copy()
+            durations = durations + (np.random.rand(*durations.shape) - 0.5)
+            durations = (durations - self.measure_stats["duration"]["mean"]) / self.measure_stats["duration"]["std"]
+            batch[i]["durations"] = durations
+            batch[i]["audio_path"] = audio_path
+
+        max_frame_length = max([sum(x["phone_durations"]) for x in batch])
+        max_phone_length = max([len(x["phones"]) for x in batch])
+        min_frame_length = min([sum(x["phone_durations"]) for x in batch])
+        random_min_frame_length = np.random.randint(0, min_frame_length)
+        if self.pad_to_multiple_of is not None:
+            max_frame_length = (max_frame_length // self.pad_to_multiple_of + 1) * self.pad_to_multiple_of
+            max_phone_length = (max_phone_length // self.pad_to_multiple_of + 1) * self.pad_to_multiple_of
+        if self.pad_to_max_length and self.overwrite_max_length:
+            max_frame_length = max(self.max_frame_length, max_frame_length)
+            max_phone_length = max(self.max_phone_length, max_phone_length)
+        max_audio_length = (max_frame_length * lco["audio"]["hop_length"])
+        audio_padding_lengths = []
+        for i, row in enumerate(batch):
+            # pad audio
+            batch[i]["audio"] = ConstantPad1d(
+                (0, max_audio_length - len(batch[i]["audio"])), np.NAN
+            )(torch.tensor(batch[i]["audio"]))
+            audio_padding_lengths.append(max_audio_length - len(batch[i]["audio"]))
+            # pad phone durations
+            batch[i]["phone_durations"] = ConstantPad1d(
+                (0, max_phone_length - len(batch[i]["phone_durations"])), 0
+            )(torch.tensor(batch[i]["phone_durations"]))
+            # pad durations
+            batch[i]["durations"] = ConstantPad1d(
+                (0, max_phone_length - len(batch[i]["durations"])), 0
+            )(torch.tensor(batch[i]["durations"]))
+            # pad phones
+            batch[i]["phones"] = ConstantPad1d((0, max_phone_length - len(batch[i]["phones"])), 0
+            )(torch.tensor(batch[i]["phones"]))
+
+        # stack
+        batch = {
+            "audio": torch.stack([x["audio"] for x in batch]),
+            "phone_durations": torch.stack([x["phone_durations"] for x in batch]),
+            "durations": torch.stack([x["durations"] for x in batch]),
+            "phones": torch.stack([x["phones"] for x in batch]),
+        }
+
+        # compute for whole batch instead of per sample as above
+        mel = self.mel_spectrogram(batch["audio"])
+        mel = torch.sqrt(mel)
+        mel = torch.matmul(self.mel_basis, mel)
+        mel = MeTTSCollator.drc(mel)
+        mel = (mel - self.measure_stats["mel"]["mean"]) / self.measure_stats["mel"]["std"]
+        batch["mel"] = mel.permute(0, 2, 1)
+        
+
+        # change mel and audio NAN to 0
+        batch["mel"][torch.isnan(batch["mel"])] = 0
+        batch["audio"][torch.isnan(batch["audio"])] = 0
+
+        # speaker
+        batch["speaker"] = torch.tensor([self.speaker2idx[x] for x in speakers])
+
+        if self.overwrite_max_length:
+            MAX_FRAMES = lco["max_lengths"]["frame"]
+            MAX_PHONES = lco["max_lengths"]["phone"]
+            BATCH_SIZE = len(batch["audio"])
+            if batch["mel"].shape[1] > MAX_FRAMES:
+                batch["mel"] = batch["mel"][:, :MAX_FRAMES, :]
+            batch["phone_durations"][:, -1] = MAX_FRAMES - batch["phone_durations"].sum(-1)
+            batch["val_ind"] = torch.arange(0, MAX_PHONES).repeat(BATCH_SIZE).reshape(BATCH_SIZE, MAX_PHONES)
+            batch["val_ind"] = batch["val_ind"].flatten().repeat_interleave(batch["phone_durations"].flatten(), dim=0).reshape(BATCH_SIZE, MAX_FRAMES)
+
+        del batch["audio"]
+
+        if self.keys != "all":
+            batch = {
+                k: v
+                for k, v in batch.items()
+                if k in self.keys
+            }
+
+        return batch

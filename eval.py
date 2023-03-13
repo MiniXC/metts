@@ -68,20 +68,20 @@ for i, item in tqdm(enumerate(dl)):
     # plot first element in batch for each measure as lineplot and save to file
     if i == 0:
         df = pd.DataFrame()
-        j = 3
-        for k, measure in enumerate(measure_order):
-            df[f"{measure}_y_{j}"] = item["measures"][measure][j].numpy().tolist() + result["logits"][:, k][j].detach().cpu().numpy().tolist()
-            df[f"{measure}_x_{j}"] = list(range(len(item["measures"][measure][j]))) + list(range(len(item["measures"][measure][j])))
-            df[f"{measure}_type_{j}"] = ["ground truth"] * len(item["measures"][measure][j]) + ["predicted"] * len(item["measures"][measure][j])
-        for measure in measure_order:
-            sns.lineplot(data=df, x=f"{measure}_x_{j}", y=f"{measure}_y_{j}", hue=f"{measure}_type_{j}", alpha=0.8)
-            # add mel spectrogram with extent (in grayscale)
-            plt.imshow(mel[j].detach().cpu().numpy().T, aspect="auto", origin="lower", extent=[0, len(mel[j]), df[f"{measure}_y_{j}"].min(), df[f"{measure}_y_{j}"].max()], cmap="gray", alpha=0.8)
-            legend = plt.legend()
-            frame = legend.get_frame()
-            frame.set_facecolor('white')
-            plt.savefig(f"examples/{j}_{measure}.png")
-            plt.clf()
+        for j in range(4):
+            for k, measure in enumerate(measure_order):
+                df[f"{measure}_y_{j}"] = item["measures"][measure][j].numpy().tolist() + result["logits"][:, k][j].detach().cpu().numpy().tolist()
+                df[f"{measure}_x_{j}"] = list(range(len(item["measures"][measure][j]))) + list(range(len(item["measures"][measure][j])))
+                df[f"{measure}_type_{j}"] = ["ground truth"] * len(item["measures"][measure][j]) + ["predicted"] * len(item["measures"][measure][j])
+            for measure in measure_order:
+                sns.lineplot(data=df, x=f"{measure}_x_{j}", y=f"{measure}_y_{j}", hue=f"{measure}_type_{j}", alpha=0.8)
+                # add mel spectrogram with extent (in grayscale)
+                plt.imshow(mel[j].detach().cpu().numpy().T, aspect="auto", origin="lower", extent=[0, len(mel[j]), df[f"{measure}_y_{j}"].min(), df[f"{measure}_y_{j}"].max()], cmap="gray", alpha=0.8)
+                legend = plt.legend()
+                frame = legend.get_frame()
+                frame.set_facecolor('white')
+                plt.savefig(f"examples/old/{j}_{measure}.png")
+                plt.clf()
     loss_dicts.append(result["loss_dict"])
     if i >= 10:
         break
