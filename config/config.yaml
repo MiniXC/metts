@@ -7,20 +7,15 @@ audio:
 max_lengths:
   phone: 384
   frame: 512
-  vocoder: 64
 measures:
   silence_mask: False
-diffusion_vocoder:
-  T: 1000
+diffusion:
+  num_steps: 1000
   beta_0: 0.000001
   beta_T: 0.01
   step_embed_dim_in: 128
   step_embed_dim_out: 512
   step_embed_dim_hidden: 512
-  residual_channels: 64
-  residual_layers: 30
-  dilation_cycle_length: 10
-  learnable_mel: False
 meta: [duration, mel, audio, energy, pitch, srmr, snr]
 consistency:
   nlayers: 6
@@ -33,7 +28,7 @@ consistency:
   measures: [energy, pitch, srmr, snr]
   dvector_dim: 256
 evaluation:
-  sampling_T: 4
+  num_steps: 4
   num_workers: 96
   chunk_size: 128
   save_audio: False

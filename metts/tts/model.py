@@ -12,7 +12,8 @@ from nnAudio.features.mel import MelSpectrogram
 from .transformer import TransformerEncoder, PositionalEncoding
 from .conformer_layer import ConformerLayer
 from .length_regulator import LengthRegulator
-from .diffusion_vocoder import DiffWave, DiffWaveSampler
+# from .diffusion_vocoder import DiffWave, DiffWaveSampler
+from .refinement_models import DiffusionConformer, DiffusionSampler
 
 num_cpus = multiprocessing.cpu_count()
 
@@ -243,6 +244,14 @@ class FastSpeechWithConsistency(PreTrainedModel):
             nn.ReLU(),
             nn.Linear(256, 1),
         )
+        self.durations_diffuser = DiffusionConformer(
+            in_channels=257, # hidden dim + predicted duration
+            frame_level_outputs=1,
+            sequence_level_outputs=0,
+        )
+        self.durations_sampler = DiffusionSampler(
+            self.durations_diffuser,
+        )
 
         # measures
         self.measure_transformer = TransformerEncoder(
@@ -299,6 +308,13 @@ class FastSpeechWithConsistency(PreTrainedModel):
         for param in self.con.parameters():
             param.requires_grad = False
 
+    def _init_weights(self, module):
+        if isinstance(module, (nn.Linear, nn.Embedding)):
+            module.weight.data.normal_(mean=0.0, std=0.02)
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
+
     def forward(self, phones, phone_durations, durations, mel, val_ind, speaker, inference=False, force_tf=False):
         tf = True # force_tf or (torch.rand(1).item() < 0.8)
 
@@ -311,9 +327,24 @@ class FastSpeechWithConsistency(PreTrainedModel):
         x = self.encoder(x)
 
         ### Duration Prediction
-        pred_durations = self.duration_transformer(x)
-        pred_durations = self.durations_linear(pred_durations).squeeze(-1)
-        duration_loss = nn.L1Loss()(pred_durations, durations)
+        pred_durations_disc = self.duration_transformer(x)
+        pred_durations_disc = self.durations_linear(pred_durations_disc).squeeze(-1)
+        duration_loss_disc = nn.L1Loss()(pred_durations_disc, durations)
+
+        #### Duration Diffusion
+        duration_diffuser_input = torch.cat([x, pred_durations_disc.unsqueeze(-1) / 0.42], dim=-1)
+        # todo: test without detaching
+        true_duration_noise, pred_duration_noise, _ = self.durations_diffuser(duration_diffuser_input, pred_durations_disc.unsqueeze(-1))
+        duration_loss_gen = nn.MSELoss()(pred_duration_noise, true_duration_noise)
+        if inference:
+            pred_durations, _ = self.durations_sampler(
+                duration_diffuser_input,
+                lco["evaluation"]["num_steps"],
+                batch_size
+            )
+            pred_durations = pred_durations.squeeze(-1)
+
+        duration_loss = duration_loss_disc + duration_loss_gen
 
         ### Length Regulator
         if not inference:
@@ -324,9 +355,15 @@ class FastSpeechWithConsistency(PreTrainedModel):
             # denoramalize durations
             # "mean": 4.9033311291969826,
             # "std": 4.793017975164098
+            print()
+            print((pred_durations_disc / 0.42).mean(), (pred_durations_disc / 0.42).std())
+            print()
             pred_durations = pred_durations * 4.793017975164098 + 4.9033311291969826
             # round
             pred_durations = torch.round(pred_durations).long()
+            if (pred_durations < 0).any():
+                print("negative duration, setting to 0")
+                pred_durations[pred_durations < 0] = 0
             pred_durations[phones == 0] = 0
             x, mask = self.lr(x, pred_durations)
 
