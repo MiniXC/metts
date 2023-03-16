@@ -19,7 +19,7 @@ from metts.tts.model import MeTTS
 # from metts.dataset.plotting import plot_item, plot_batch_meta
 from metts.dataset.measure import PitchMeasure, EnergyMeasure, SRMRMeasure, SNRMeasure
 
-from metts.tts.consistency_predictor import ConsistencyPredictor, ConformerConsistencyPredictor
+from metts.tts.consistency_predictor import ConsistencyPredictor, ConformerConsistencyPredictor, ConformerConsistencyPredictorWithDVector
 
 import time
 
@@ -37,7 +37,7 @@ collator = MeTTSCollator(
     speaker2idx=speaker2idx,
     phone2idx=phone2idx,
     measure_stats=measure_stats,
-    keys=["mel", "measures"],
+    keys=["mel", "measures",  "dvector"],
     measures=[PitchMeasure(), EnergyMeasure(), SRMRMeasure(), SNRMeasure()],
 )
 
@@ -49,7 +49,7 @@ dl = DataLoader(
     num_workers=16,
 )
 
-model = ConformerConsistencyPredictor.from_pretrained("output/checkpoint-12000")
+model = ConformerConsistencyPredictor.from_pretrained("models/teacher_consistency")
 # eval
 model.eval()
 # disable dropout
@@ -60,8 +60,7 @@ loss_dicts = []
 
 for i, item in tqdm(enumerate(dl)):
     mel = item["mel"]
-    result = model(mel, item["measures"])
-    # raise
+    result = model(mel) # dvector=item["dvector"])
     # plot predicted measures against ground truth and save to file
     # first we construct a dataframe, then we create one plot per measure (inkl. ground truth and predicted)
     # then we save the plot to a file
@@ -86,6 +85,6 @@ for i, item in tqdm(enumerate(dl)):
     if i >= 10:
         break
 
-for measure in measure_order:
-    loss = sum([loss_dict[measure] for loss_dict in loss_dicts])
-    print(f"{measure}: {loss / len(loss_dicts)}")
+# for measure in measure_order:
+#     loss = sum([loss_dict[measure] for loss_dict in loss_dicts])
+#     print(f"{measure}: {loss / len(loss_dicts)}")

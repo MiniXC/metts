@@ -180,6 +180,15 @@ class ConformerConsistencyPredictorWithDVector(PreTrainedModel):
             nn.Linear(dvector_dim, dvector_dim),
         )
 
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            module.weight.data.normal_(mean=0.0, std=0.02)
+            if module.bias is not None:
+                module.bias.data.zero_()
+        elif isinstance(module, nn.LayerNorm):
+            module.bias.data.zero_()
+            module.weight.data.fill_(1.0)
+
     def forward(self, mel, dvector=None):
         x = self.in_layer(mel)
         x = self.positional_encoding(x)
@@ -187,18 +196,17 @@ class ConformerConsistencyPredictorWithDVector(PreTrainedModel):
         out = self.linear(out_conv)
         out = out.transpose(1, 2)
         measure_results = {}
-        loss = None
-        loss_dict = None
+        loss = 0
+        loss_dict = {}
         if hasattr(self, "teacher"):
-            loss_dict = {}
             measures_loss = 0
             teacher_results = self.teacher(mel)["logits"]
             for i, measure in enumerate(self.measures):
+                m_loss = nn.MSELoss()(out[:, i], teacher_results[:, i])
                 measure_results[measure] = out[:, i]
-                m_loss = nn.MSELoss()(measure_results[measure], teacher_results[:, i])
                 loss_dict[measure] = m_loss
-                measures_loss += m_loss
-            loss = measures_loss / len(self.measures)
+                measures_loss = measures_loss + m_loss
+            loss = loss + measures_loss / len(self.measures)
         ### d-vector
         # predict d-vector using global average and max pooling as input
         dvector_input = torch.cat(
@@ -212,11 +220,11 @@ class ConformerConsistencyPredictorWithDVector(PreTrainedModel):
         if dvector is not None:
             dvector_loss = nn.MSELoss()(dvector_pred, dvector)
             loss_dict["dvector"] = dvector_loss
-            loss += dvector_loss
+            loss = loss + dvector_loss
         return {
             "loss": loss,
             "loss_dict": loss_dict,
-            "measures": out,
+            "logits": out,
             "dvector": dvector_pred,
         }
 

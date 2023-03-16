@@ -514,7 +514,6 @@ class FastSpeechWithConsistencyCollator():
         max_frame_length = max([sum(x["phone_durations"]) for x in batch])
         max_phone_length = max([len(x["phones"]) for x in batch])
         min_frame_length = min([sum(x["phone_durations"]) for x in batch])
-        random_min_frame_length = np.random.randint(0, min_frame_length)
         if self.pad_to_multiple_of is not None:
             max_frame_length = (max_frame_length // self.pad_to_multiple_of + 1) * self.pad_to_multiple_of
             max_phone_length = (max_phone_length // self.pad_to_multiple_of + 1) * self.pad_to_multiple_of

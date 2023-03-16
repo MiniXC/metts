@@ -36,6 +36,8 @@ def compute_metrics():
         log_dict = {k: torch.stack([d[k] for d in log_dict]).mean().item() for k in log_dict[0].keys()}
 
         return log_dict
+    else:
+        return {}
 
 def main(index):
     global trainer, dev, dev_collator
@@ -70,8 +72,11 @@ def main(index):
 
     teacher_model = ConformerConsistencyPredictor.from_pretrained("models/teacher_consistency")
     teacher_model.eval()
-    model = ConformerConsistencyPredictorWithDVector(ConsistencyPredictorConfig())
+    model = ConformerConsistencyPredictorWithDVector.from_pretrained("output/checkpoint-1000") #ConformerConsistencyPredictorWithDVector(ConsistencyPredictorConfig())
     model.teacher = teacher_model
+    # freeze teacher
+    for p in model.teacher.parameters():
+        p.requires_grad = False
 
     trainer = Trainer(
         model,

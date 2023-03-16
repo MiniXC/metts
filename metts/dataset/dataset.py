@@ -290,15 +290,16 @@ class MeTTS(datasets.GeneratorBasedBuilder):
         for i, row in ds.iterrows():
             # 10kB is the minimum size of a wav file for our purposes
             if Path(row["audio"]).stat().st_size >= 10_000:
-                result = {
-                    "id": row["basename"],
-                    "speaker": row["speaker"],
-                    "text": row["text"],
-                    "start": row["start"],
-                    "end": row["end"],
-                    "phones": row["phones"],
-                    "phone_durations": row["duration"],
-                    "audio": str(row["audio"]),
-                }
-                yield j, result
-                j += 1
+                if len(row["phones"]) < 384:
+                    result = {
+                        "id": row["basename"],
+                        "speaker": row["speaker"],
+                        "text": row["text"],
+                        "start": row["start"],
+                        "end": row["end"],
+                        "phones": row["phones"],
+                        "phone_durations": row["duration"],
+                        "audio": str(row["audio"]),
+                    }
+                    yield j, result
+                    j += 1

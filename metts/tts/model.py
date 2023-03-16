@@ -285,7 +285,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
                 dropout=0.1,
                 conv_depthwise=True,
             ),
-            num_layers=4,
+            num_layers=6,
             return_additional_layer=2,
         )
         self.final = nn.Sequential(
@@ -299,7 +299,9 @@ class FastSpeechWithConsistency(PreTrainedModel):
         for param in self.con.parameters():
             param.requires_grad = False
 
-    def forward(self, phones, phone_durations, durations, mel, val_ind, speaker):
+    def forward(self, phones, phone_durations, durations, mel, val_ind, speaker, inference=False, force_tf=False):
+        tf = True # force_tf or (torch.rand(1).item() < 0.8)
+
         ### Encoder
         batch_size = phones.shape[0]
         x = self.embedding(phones)
@@ -314,9 +316,21 @@ class FastSpeechWithConsistency(PreTrainedModel):
         duration_loss = nn.L1Loss()(pred_durations, durations)
 
         ### Length Regulator
-        x, mask = self.lr(x, phone_durations, val_ind)
-        if x.shape[1] > mel.shape[1]:
-            x = x[:, :mel.shape[1]]
+        if not inference:
+            x, mask = self.lr(x, phone_durations, val_ind)
+            if x.shape[1] > mel.shape[1]:
+                x = x[:, :mel.shape[1]]
+        else:
+            # denoramalize durations
+            # "mean": 4.9033311291969826,
+            # "std": 4.793017975164098
+            pred_durations = pred_durations * 4.793017975164098 + 4.9033311291969826
+            # round
+            pred_durations = torch.round(pred_durations).long()
+            pred_durations[phones == 0] = 0
+            x, mask = self.lr(x, pred_durations)
+
+        mask_scale = mask.sum() / (mask.shape[0] * mask.shape[1])
 
         ### Measure Prediction
         pred_measures = self.measure_transformer(x)
@@ -326,19 +340,28 @@ class FastSpeechWithConsistency(PreTrainedModel):
         pred_dvector = torch.cat([x.mean(dim=1), x.max(dim=1)[0]], dim=-1)
         pred_dvector = self.measures_dvector(pred_dvector)
         consistency_result = self.con(mel)
-        true_measures = consistency_result["measures"]
+        true_measures = consistency_result["logits"]
         true_dvector = consistency_result["dvector"]
         #### Measure Loss
-        measure_loss = nn.L1Loss()(pred_measures, true_measures) / 4
+        measure_loss = nn.MSELoss()(pred_measures, true_measures) / 4
+        measure_loss = measure_loss * mask_scale
         #### Dvector Loss
-        dvector_loss = nn.L1Loss()(pred_dvector, true_dvector)
+        dvector_loss = nn.MSELoss()(pred_dvector, true_dvector)
 
-        ### Add Dvector to Decoder
-        dvector_input = self.dvector_to_encoder(true_dvector)
-        x = x + dvector_input.unsqueeze(1)
-        ### Add Measures to Decoder
-        measures_input = self.measures_to_encoder(true_measures.transpose(1, 2))
-        x = x + measures_input
+        if inference or not tf:
+            ### Add Dvector to Decoder
+            dvector_input = self.dvector_to_encoder(true_dvector)
+            x = x + dvector_input.unsqueeze(1)
+            ### Add Measures to Decoder
+            measures_input = self.measures_to_encoder(pred_measures.transpose(1, 2))
+            x = x + measures_input
+        else:
+            ### Add Dvector to Decoder
+            dvector_input = self.dvector_to_encoder(pred_dvector)
+            x = x + dvector_input.unsqueeze(1)
+            ### Add Measures to Decoder
+            measures_input = self.measures_to_encoder(true_measures.transpose(1, 2))
+            x = x + measures_input
 
         ### Decoder
         x = self.positional_encoding(x)
@@ -346,25 +369,38 @@ class FastSpeechWithConsistency(PreTrainedModel):
         x = self.final(x)
 
         ### Consistency Loss
-        cons_measures = self.con(x)["measures"]
+        cons_measures = self.con(mel)["logits"]
         cons_dvector = self.con(x)["dvector"]
-        consistency_loss = nn.L1Loss()(cons_measures, true_measures)
-        consistency_loss += nn.L1Loss()(cons_dvector, true_dvector)
+        if inference or not tf:
+            consistency_loss = nn.MSELoss()(cons_measures, pred_measures)
+            consistency_loss = consistency_loss + nn.MSELoss()(cons_dvector, pred_dvector)
+        else:
+            consistency_loss = nn.MSELoss()(cons_measures, true_measures)
+            consistency_loss = consistency_loss + nn.MSELoss()(cons_dvector, true_dvector)
+
+        consistency_loss = consistency_loss * mask_scale
 
         ### Mel Loss
+        x = x * mask
+        mel = mel * mask
         mel = mel.transpose(1, 2)
         x = x.transpose(1, 2)
-        mel_loss = nn.MSELoss()(x, mel)
+        mel_loss = nn.L1Loss()(x, mel)
 
-        loss = (mel_loss + duration_loss + measure_loss + consistency_loss) / 4
+        # denormalize mel
+        x = x * 1.0958075523376465 + -0.19927863776683807
+        
+        loss = (mel_loss + duration_loss + measure_loss + consistency_loss + dvector_loss) / 5
 
         return {
             "loss": loss,
-            "mel": mel,
+            "mel": x,
             "loss_dict": {
                 "mel_loss": mel_loss,
                 "duration_loss": duration_loss,
                 "measure_loss": measure_loss,
                 "consistency_loss": consistency_loss,
+                "dvector_loss": dvector_loss,
             },
+            "mask": mask,
         }

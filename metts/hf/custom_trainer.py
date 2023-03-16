@@ -152,7 +152,7 @@ from transformers.utils.generic import ContextManagers
 
 _device_prefetch_size = 4
 _loader_prefetch_size = 8 # 100
-_prefetch_factor=2
+_prefetch_factor=5
 
 _is_native_cpu_amp_available = is_torch_greater_or_equal_than_1_10
 

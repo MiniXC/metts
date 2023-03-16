@@ -5,8 +5,8 @@ audio:
   hop_length: 256
   n_mels: 80
 max_lengths:
-  phone: 448
-  frame: 576
+  phone: 384
+  frame: 512
   vocoder: 64
 measures:
   silence_mask: False
