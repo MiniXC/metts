@@ -50,7 +50,7 @@ dl = DataLoader(
 )
 
 consistency_net = ConformerConsistencyPredictorWithDVector.from_pretrained("models/consistencynet_small")
-model = FastSpeechWithConsistency.from_pretrained("models/full_consistency_l1", consistency_net=consistency_net)
+model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-3000", consistency_net=consistency_net)
 
 # eval
 #model.eval()
@@ -71,7 +71,7 @@ for i, item in tqdm(enumerate(dl), total=len(dl)):
     result_inf = model(
         item["phones"],
         item["phone_durations"],
-        item["durations"],
+        item["durations"].half(),
         item["mel"],
         item["val_ind"],
         item["speaker"],
@@ -81,7 +81,7 @@ for i, item in tqdm(enumerate(dl), total=len(dl)):
     result_tf = model(
         item["phones"],
         item["phone_durations"],
-        item["durations"],
+        item["durations"].half(),
         item["mel"],
         item["val_ind"],
         item["speaker"],
@@ -113,7 +113,7 @@ for i, item in tqdm(enumerate(dl), total=len(dl)):
     plt.title("Predicted (Inf)")
 
     # save to examples
-    plt.savefig(f"examples/{i}_mel_tf.png")
+    plt.savefig(f"examples/{i}_mel_tf_disc.png")
 
     print("inference mode losses")
     for loss in result_inf["loss_dict"]:

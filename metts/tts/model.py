@@ -334,7 +334,8 @@ class FastSpeechWithConsistency(PreTrainedModel):
         #### Duration Diffusion
         duration_diffuser_input = torch.cat([x, pred_durations_disc.unsqueeze(-1) / 0.42], dim=-1)
         # todo: test without detaching
-        true_duration_noise, pred_duration_noise, _ = self.durations_diffuser(duration_diffuser_input, pred_durations_disc.unsqueeze(-1))
+        durations = durations.to(duration_diffuser_input.dtype)
+        true_duration_noise, pred_duration_noise, _ = self.durations_diffuser(duration_diffuser_input, durations.unsqueeze(-1))
         duration_loss_gen = nn.MSELoss()(pred_duration_noise, true_duration_noise)
         if inference:
             pred_durations, _ = self.durations_sampler(
@@ -355,9 +356,26 @@ class FastSpeechWithConsistency(PreTrainedModel):
             # denoramalize durations
             # "mean": 4.9033311291969826,
             # "std": 4.793017975164098
-            print()
-            print((pred_durations_disc / 0.42).mean(), (pred_durations_disc / 0.42).std())
-            print()
+            import seaborn as sns
+            import matplotlib.pyplot as plt
+            import numpy as np
+            import pandas as pd
+
+            diff_dur = (pred_durations[0] / 0.42).flatten().detach().cpu().numpy()
+            disc_dur = pred_durations_disc[0].flatten().detach().cpu().numpy()
+            hue = ["diff"] * len(diff_dur) + ["disc"] * len(disc_dur)
+            all_dur = np.concatenate([diff_dur, disc_dur])
+            x_vals = list(range(len(diff_dur))) + list(range(len(disc_dur)))
+            df = pd.DataFrame({"duration": all_dur, "type": hue, "x": x_vals})
+
+            # displot
+            sns.lineplot(df, x="x", y="duration", hue="type", alpha=0.5)
+            # save to file
+            plt.savefig("dur_line.png")
+            
+            raise
+
+            #pred_durations = pred_durations_disc
             pred_durations = pred_durations * 4.793017975164098 + 4.9033311291969826
             # round
             pred_durations = torch.round(pred_durations).long()

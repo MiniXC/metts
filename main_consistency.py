@@ -2,8 +2,6 @@ from dataclasses import dataclass
 import json
 
 from metts.dataset.data_collator import MeTTSCollator, VocoderCollator
-from metts.dataset.dummy import DummyDataset
-from metts.tts.diffusion_vocoder import Vocoder, VocoderConfig
 from metts.tts.consistency_predictor import ConformerConsistencyPredictor, ConsistencyPredictor, ConsistencyPredictorConfig
 from metts.dataset.measure import PitchMeasure, EnergyMeasure, SRMRMeasure, SNRMeasure
 from torch.utils.data import DataLoader
@@ -60,7 +58,7 @@ def main(index):
     )
 
     #model = ConsistencyPredictor(ConsistencyPredictorConfig())
-    model = ConformerConsistencyPredictor.from_pretrained("output/checkpoint-12000")
+    model = ConformerConsistencyPredictor.from_pretrained("output/checkpoint-1000")
 
     trainer = Trainer(
         model,

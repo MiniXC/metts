@@ -220,13 +220,11 @@ class DiffusionConformer(nn.Module):
         )
         self.diff_params = compute_diffusion_params(noise_schedule)
 
-        print(in_channels)
-        self.conditional_in = nn.Linear(in_channels, 256)
-        # nn.Sequential(
-        #     nn.Linear(in_channels, 256),
-        #     nn.ReLU(),
-        #     nn.Linear(256, 256),
-        # )
+        self.conditional_in = nn.Sequential(
+            nn.Linear(in_channels, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+        )
         self.step_in = nn.Sequential(
             nn.Linear(lco["diffusion"]["step_embed_dim_out"], 256),
             nn.ReLU(),

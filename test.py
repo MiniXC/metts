@@ -20,36 +20,32 @@ if __name__ == "__main__":
     speaker2idx = json.load(open("data/speaker2idx.json"))
     phone2idx = json.load(open("data/phone2idx.json"))
     measure_stats = json.load(open("data/measure_stats.json"))
-    # collator = MeTTSCollator(
-    #     speaker2idx=speaker2idx,
-    #     phone2idx=phone2idx,
-    #     measure_stats=measure_stats,
-    #     measures=[
-    #         PitchMeasure(),
-    #         EnergyMeasure(),
-    #         SRMRMeasure(),
-    #         SNRMeasure(),
-    #     ],
-    #     keys=["mel", "measures", "durations"],
-    # )
-
-    collator = FastSpeechWithConsistencyCollator(
+    collator = MeTTSCollator(
         speaker2idx=speaker2idx,
         phone2idx=phone2idx,
         measure_stats=measure_stats,
-        keys="all",
+        measures=[
+            PitchMeasure(),
+            EnergyMeasure(),
+            SRMRMeasure(),
+            SNRMeasure(),
+        ],
+        keys=["mel", "measures", "durations", "phones"],
     )
+
+    # collator = FastSpeechWithConsistencyCollator(
+    #     speaker2idx=speaker2idx,
+    #     phone2idx=phone2idx,
+    #     measure_stats=measure_stats,
+    #     keys="all",
+    # )
     dev = DataLoader(
         dataset=dev_ds,
         batch_size=8,
         collate_fn=collator.collate_fn,
-        num_workers=32,
+        num_workers=96,
         shuffle=True,
     )
-
-    for i, batch in enumerate(dev):
-        print(batch)
-        raise
 
     m_dict = {
         k: [] for k in lco["meta"]
@@ -58,21 +54,39 @@ if __name__ == "__main__":
         k: [] for k in lco["meta"]
     }
 
-    mean_dict = {
-        k: [] for k in ["pitch", "energy", "srmr", "snr", "duration"]
+    n_dict = {
+        k: 0 for k in ["pitch", "energy", "srmr", "snr", "duration", "mel"]
     }
 
-    std_dict = {
-        k: [] for k in ["pitch", "energy", "srmr", "snr", "duration"]
+    s1_dict = {
+        k: 0 for k in ["pitch", "energy", "srmr", "snr", "duration", "mel"]
+    }
+
+    s2_dict = {
+        k: 0 for k in ["pitch", "energy", "srmr", "snr", "duration", "mel"]
     }
 
     for i, batch in tqdm(enumerate(dev), total=100_000):
         for k in ["pitch", "energy", "srmr", "snr"]:
-            mean_dict[k].append(np.concatenate(batch["measures"][k]).mean())
-            std_dict[k].append(np.concatenate(batch["measures"][k]).std())
-        mean_dict["duration"].append(np.concatenate(batch["durations"]).mean())
-        std_dict["duration"].append(np.concatenate(batch["durations"]).std())
+            measure_val = batch["measures"][k]
+            n_dict[k] += (batch["measures"]["energy"] != 0).sum()
+            s1_dict[k] += measure_val.sum()
+            s2_dict[k] += (measure_val ** 2).sum()
+        # duration
+        duration = batch["durations"]
+        n_dict["duration"] += (batch["phones"]!=0).sum()
+        s1_dict["duration"] += duration.sum()
+        s2_dict["duration"] += (duration ** 2).sum()
+        # mel
+        mel = batch["mel"]
+        n_dict["mel"] += (mel!=0).sum()
+        s1_dict["mel"] += mel.sum()
+        s2_dict["mel"] += (mel ** 2).sum()
         if i % 10:
             print("==================================")
-            for k in mean_dict:
-                print(k, np.mean(mean_dict[k]), np.mean(std_dict[k]))
+            for k in n_dict:
+                print(
+                    k,
+                    s1_dict[k] / n_dict[k],
+                    np.sqrt(s2_dict[k] / n_dict[k] - (s1_dict[k] / n_dict[k]) ** 2),
+                )
