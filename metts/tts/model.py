@@ -353,15 +353,15 @@ class FastSpeechWithConsistency(PreTrainedModel):
             if x.shape[1] > mel.shape[1]:
                 x = x[:, :mel.shape[1]]
         else:
-            # denoramalize durations
-            # "mean": 4.9033311291969826,
-            # "std": 4.793017975164098
             import seaborn as sns
             import matplotlib.pyplot as plt
             import numpy as np
             import pandas as pd
 
-            diff_dur = (pred_durations[0] / 0.42).flatten().detach().cpu().numpy()
+            pred_durations = torch.exp(pred_durations) - 1e-5
+            pred_durations_disc = torch.exp(pred_durations_disc) - 1e-5
+
+            diff_dur = pred_durations[0].flatten().detach().cpu().numpy()
             disc_dur = pred_durations_disc[0].flatten().detach().cpu().numpy()
             hue = ["diff"] * len(diff_dur) + ["disc"] * len(disc_dur)
             all_dur = np.concatenate([diff_dur, disc_dur])

@@ -2,8 +2,6 @@ from dataclasses import dataclass
 import json
 
 from metts.dataset.data_collator import MeTTSCollator, VocoderCollator
-from metts.dataset.dummy import DummyDataset
-from metts.tts.diffusion_vocoder import Vocoder, VocoderConfig
 from metts.tts.consistency_predictor import ConformerConsistencyPredictor, ConformerConsistencyPredictorWithDVector, ConsistencyPredictorConfig
 from metts.dataset.measure import PitchMeasure, EnergyMeasure, SRMRMeasure, SNRMeasure
 from torch.utils.data import DataLoader
@@ -70,13 +68,10 @@ def main(index):
         measures=[],
     )
 
-    teacher_model = ConformerConsistencyPredictor.from_pretrained("models/teacher_consistency")
+    teacher_model = ConformerConsistencyPredictor.from_pretrained("models/consistencynet_log")
     teacher_model.eval()
-    model = ConformerConsistencyPredictorWithDVector.from_pretrained("output/checkpoint-1000") #ConformerConsistencyPredictorWithDVector(ConsistencyPredictorConfig())
-    model.teacher = teacher_model
-    # freeze teacher
-    for p in model.teacher.parameters():
-        p.requires_grad = False
+    model = ConformerConsistencyPredictorWithDVector(ConsistencyPredictorConfig())
+    model.set_teacher(teacher_model)
 
     trainer = Trainer(
         model,

@@ -77,10 +77,10 @@ class PitchMeasure(Measure):
         # pitch[pitch == 0] = np.nan
         if sum(durations) < len(pitch):
             pitch = pitch[:sum(durations)]
-        # if silence_mask is not None:
-        #     pitch[silence_mask] = np.nan
-        # if np.isnan(pitch).all():
-        #     pitch[:] = 1e-6
+        if silence_mask is not None:
+            pitch[silence_mask] = np.nan
+        if np.isnan(pitch).all():
+            pitch[:] = 1e-6
         return pitch
 
 class EnergyMeasure(Measure):

@@ -191,8 +191,9 @@ class MeTTSCollator():
             unexpanded_silence_mask = ["[" in p for p in phones]
             silence_mask = self._expand(unexpanded_silence_mask, durations)
             batch[i]["phone_durations"] = durations.copy()
-            durations = durations + (np.random.rand(*durations.shape) - 0.5)
-            durations = (durations - self.measure_stats["duration"]["mean"]) / self.measure_stats["duration"]["std"]
+            durations = durations + (np.random.rand(*durations.shape)) #+ 1e-5
+            # durations = np.log(durations)
+            # durations = (durations - self.measure_stats["duration"]["mean"]) / self.measure_stats["duration"]["std"]
             batch[i]["durations"] = durations
             if self.measures is not None:
                 measure_paths = {
@@ -209,8 +210,12 @@ class MeTTSCollator():
                         measure.name: measure(batch[i]["audio"], row["phone_durations"], silence_mask, True)
                         for measure in self.measures
                     }
+                    # measures = {
+                    #     key: np.log(value["measure"] + 1e-5) # (value["measure"] - self.measure_stats[key]["mean"]) / self.measure_stats[key]["std"]
+                    #     for key, value in measure_dict.items()
+                    # }
                     measures = {
-                        key: (value["measure"] - self.measure_stats[key]["mean"]) / self.measure_stats[key]["std"]
+                        key: (value["measure"])# - self.measure_stats[key]["mean"]) / self.measure_stats[key]["std"]
                         for key, value in measure_dict.items()
                     }
                     for measure in self.measures:
@@ -269,6 +274,7 @@ class MeTTSCollator():
                     torch.save(result["dvector"][i], x["audio_path"].replace(".wav", "_speaker.pt"))
             else:
                 result["dvector"] = torch.stack([torch.load(x["audio_path"].replace(".wav", "_speaker.pt")) for x in batch])
+            result["dvector"] = (result["dvector"] - self.measure_stats["dvector"]["mean"]) / self.measure_stats["dvector"]["std"]
             torch.cuda.empty_cache()
         result["audio"] = pad_sequence([x["audio"] for x in batch], batch_first=True)
         result["mel"] = pad_sequence([x["mel"] for x in batch], batch_first=True)

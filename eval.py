@@ -49,7 +49,7 @@ dl = DataLoader(
     num_workers=16,
 )
 
-model = ConformerConsistencyPredictor.from_pretrained("models/teacher_consistency")
+model = ConformerConsistencyPredictorWithDVector.from_pretrained("models/consistencynet_normalized")
 # eval
 model.eval()
 # disable dropout
@@ -79,7 +79,7 @@ for i, item in tqdm(enumerate(dl)):
                 legend = plt.legend()
                 frame = legend.get_frame()
                 frame.set_facecolor('white')
-                plt.savefig(f"examples/old/{j}_{measure}.png")
+                plt.savefig(f"examples/new/{j}_{measure}.png")
                 plt.clf()
     loss_dicts.append(result["loss_dict"])
     if i >= 10:

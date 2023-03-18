@@ -2644,6 +2644,9 @@ class Trainer:
             # Calling the state_dict needs to be done on the wrapped model and on all processes.
             os.makedirs(output_dir, exist_ok=True)
             state_dict = self.model_wrapped.state_dict()
+            state_dict = {
+                k: v for k, v in state_dict.items() if not "_external_teacher" in k
+            }
             if self.args.should_save:
                 self._save(output_dir, state_dict=state_dict)
             if IS_SAGEMAKER_MP_POST_1_10:
@@ -2655,7 +2658,10 @@ class Trainer:
             or self.fsdp is not None
         ):
             state_dict = self.model.state_dict()
-
+            state_dict = {
+                k: v for k, v in state_dict.items()
+                if not "_external_teacher" in k
+            }
             if self.args.should_save:
                 self._save(output_dir, state_dict=state_dict)
         elif self.deepspeed:
