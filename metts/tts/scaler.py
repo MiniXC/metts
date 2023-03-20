@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-class GaussianMinMaxScaler():
+class GaussianMinMaxScaler(nn.Module):
     """
     A min-max scaler that does the following, given the number of samples in the dataset N:
     1. Apply as square root to the data
@@ -9,13 +9,23 @@ class GaussianMinMaxScaler():
     """
 
     def __init__(self, width, for_tensors=True, floor=1e-6):
-        self.expected_max = width / 2
-        self.max = None
-        self.min = None
-        self._n = 0
-        self.for_tensors = for_tensors
-        self.floor = floor
-        self._scale = None
+        if for_tensors:
+            super().__init__()
+            # set as a parameter so that it is saved in the model
+            self._scale = nn.Parameter(requires_grad=False)
+            self._n = nn.Parameter(torch.tensor(0), requires_grad=False)
+            self.max = nn.Parameter(requires_grad=False)
+            self.min = nn.Parameter(requires_grad=False)
+            self.expected_max = nn.Parameter(torch.tensor(width / 2), requires_grad=False)
+            self.floor = nn.Parameter(torch.tensor(floor), requires_grad=False)
+        else:
+            self.expected_max = width / 2
+            self.max = None
+            self.min = None
+            self._n = 0
+            self.for_tensors = for_tensors
+            self.floor = floor
+            self._scale = None
 
     def partial_fit(self, X):
         scale_change = False
