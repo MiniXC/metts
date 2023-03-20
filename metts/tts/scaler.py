@@ -9,12 +9,13 @@ class GaussianMinMaxScaler(nn.Module):
     2. Apply a min-max scaler to the data ranging from the expected minimum and maximum of a Gaussian distribution with samples N
     """
 
-    def __init__(self, width, for_tensors=True, floor=1e-6):
+    def __init__(self, width, for_tensors=True, floor=1e-6, sqrt=True):
         if for_tensors:
             super().__init__()
             self.isnan = torch.isnan
         else:
             self.isnan = np.isnan
+        self.sqrt = sqrt
         expected_max = width / 2
         _max = float("nan")
         _min = float("nan")
@@ -70,9 +71,15 @@ class GaussianMinMaxScaler(nn.Module):
                 scale_change = True
         if scale_change:
             if self.for_tensors:
-                self._scale = torch.sqrt(self.max - self.min + self.floor)
+                if self.sqrt:
+                    self._scale = torch.sqrt(self.max - self.min + self.floor)
+                else:
+                    self._scale = self.max - self.min + self.floor
             else:
-                self._scale = np.sqrt(self.max - self.min + self.floor)
+                if self.sqrt:
+                    self._scale = np.sqrt(self.max - self.min + self.floor)
+                else:
+                    self._scale = self.max - self.min + self.floor
         # add numpy array size to n, regardless of shape
         self._n += len(X.flatten())
 
@@ -80,12 +87,15 @@ class GaussianMinMaxScaler(nn.Module):
         X = X - self.min + self.floor
         if self.for_tensors:
             X = X.clip(min=self.floor.item())
-            X = torch.sqrt(X)
+            if self.sqrt:
+                X = torch.sqrt(X)
             # print if any nan values
             if torch.isnan(X).any():
                 print("NAN values in GaussianMinMaxScaler!")
         else:
-            X = np.sqrt(X)
+            X = np.clip(X, a_min=self.floor, a_max=None)
+            if self.sqrt:
+                X = np.sqrt(X)
         X = X / self._scale
         X = X - 0.5
         X = X * self.expected_max
@@ -96,6 +106,7 @@ class GaussianMinMaxScaler(nn.Module):
         X = X / self.expected_max
         X = X + 0.5
         X = X * self._scale
-        X = X ** 2
-        X = X + self.min
+        if self.sqrt:
+            X = X ** 2
+        X = X + self.min - self.floor
         return X

@@ -34,16 +34,16 @@ class FastSpeechWithConsistency(PreTrainedModel):
             "duration_predictor_diff",
             "energy_predictor",
             "energy_predictor_diff",
-            "energy_predictor_consistency",
+            "energy_consistency",
             "pitch_predictor",
             "pitch_predictor_diff",
-            "pitch_predictor_consistency",
+            "pitch_consistency",
             "snr_predictor",
             "snr_predictor_diff",
-            "snr_predictor_consistency",
+            "snr_consistency",
             "srmr_predictor",
             "srmr_predictor_diff",
-            "srmr_predictor_consistency",
+            "srmr_consistency",
         ]
 
         # consistency
@@ -184,9 +184,6 @@ class FastSpeechWithConsistency(PreTrainedModel):
 
         loss_dict = {}
 
-        print(self.con.scalers["mel"]._n)
-        raise
-
         norm_mel = self.con.scalers["mel"].transform(mel)
 
         if self.duration_scaler._n <= 1_000_000:
@@ -241,21 +238,22 @@ class FastSpeechWithConsistency(PreTrainedModel):
         pred_measures = self.measure_transformer(x)
         pred_measures = self.measures_linear(pred_measures)
         pred_measures = pred_measures.transpose(1, 2)
-        # max pool and avg pool for dvector
+        # max pool and avg pool for dvector        
         pred_dvector = torch.cat([x.mean(dim=1), x.max(dim=1)[0]], dim=-1)
         pred_dvector = self.measures_dvector(pred_dvector)
         #### Measure Loss
         for i, measures in enumerate(self.con.measures):
-            loss_dict[f"{measures}_predictor"] = nn.MSELoss()(pred_measures[i], true_measures[i])
+            loss_dict[f"{measures}_predictor"] = nn.MSELoss()(pred_measures[:, i], true_measures[:, i])
         #### Dvector Loss
         loss_dict["dvector_predictor"] = nn.MSELoss()(pred_dvector, true_dvector)
         ### Measure Diffusion
         measure_diffuser_input = torch.cat([x, pred_measures.transpose(1, 2)], dim=-1)
         measure_diffuser_dvec = self.measures_dvector_in(pred_dvector)
         measure_diffuser_input = measure_diffuser_input + measure_diffuser_dvec.unsqueeze(1)
-        true_measure_noise, pred_measure_noise, true_dvector_noise, pred_dvector_noise = self.measures_diffuser(measure_diffuser_input, true_measures, true_dvector)
+        true_measures_diff = true_measures.transpose(1, 2)
+        true_measure_noise, pred_measure_noise, true_dvector_noise, pred_dvector_noise = self.measures_diffuser(measure_diffuser_input, true_measures_diff, true_dvector)
         for i, measures in enumerate(self.con.measures):
-            loss_dict[f"{measures}_predictor_diff"] = nn.MSELoss()(pred_measure_noise[i], true_measure_noise[i])
+            loss_dict[f"{measures}_predictor_diff"] = nn.MSELoss()(pred_measure_noise[:, i], true_measure_noise[:, i])
         loss_dict["dvector_predictor_diff"] = nn.MSELoss()(pred_dvector_noise, true_dvector_noise)
 
         if inference or not tf:
@@ -271,7 +269,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
             ### Add Measures to Decoder
             for i, measures in enumerate(self.con.measures):
                 measure_input = getattr(self, f"{measures}_embed")(
-                    torch.bucketize(pred_measures[i], self.bins[i])
+                    torch.bucketize(pred_measures[:, i], self.bins)
                 )
                 x = x + measure_input.unsqueeze(1)
         else:
@@ -281,9 +279,9 @@ class FastSpeechWithConsistency(PreTrainedModel):
             ### Add Measures to Decoder
             for i, measures in enumerate(self.con.measures):
                 measure_input = getattr(self, f"{measures}_embed")(
-                    torch.bucketize(pred_measures[i], self.bins[i])
+                    torch.bucketize(pred_measures[:, i], self.bins)
                 )
-                x = x + measure_input.unsqueeze(1)            
+                x = x + measure_input
 
         ### Decoder
         x = self.positional_encoding(x)
@@ -299,7 +297,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
         #     consistency_loss = consistency_loss + nn.MSELoss()(cons_dvector, pred_dvector)
         # TODO: test above
         for i, measure in enumerate(self.con.measures):
-            loss_dict[f"{measure}_consistency"] = nn.MSELoss()(cons_measures[i], true_measures[i])
+            loss_dict[f"{measure}_consistency"] = nn.MSELoss()(cons_measures[:, i], true_measures[:, i])
         loss_dict["dvector_consistency"] = nn.MSELoss()(cons_dvector, true_dvector)
 
         ### Mel Loss
@@ -307,19 +305,20 @@ class FastSpeechWithConsistency(PreTrainedModel):
         mel = mel * mask
         mel = mel.transpose(1, 2)
         x = x.transpose(1, 2)
-        loss_dict["mel_loss"] = nn.MSELoss()(x, mel)
+        loss_dict["mel"] = nn.MSELoss()(x, mel)
 
         ### Mel Diffusion
-        mel_diffuser_input = torch.cat([x, mel], dim=-1)
-        true_mel_noise, pred_mel_noise = self.mel_diffuser(mel_diffuser_input)
+        mel_diffuser_input = torch.cat([hidden, x.transpose(1, 2)], dim=-1)
+
+        true_mel_noise, pred_mel_noise, _, _ = self.mel_diffuser(mel_diffuser_input, mel.transpose(1, 2))
         loss_dict["mel_diffusion"] = nn.MSELoss()(pred_mel_noise, true_mel_noise)
 
-        ### Mel Sampling
+        ### Mel Samplingq
         if inference:
             x, _ = self.mel_sampler(mel_diffuser_input, lco["evaluation"]["num_steps"], batch_size)
 
         # denormalize mel
-        x = self.mel_scaler.inverse_transform(x)
+        x = self.con.scalers["mel"].inverse_transform(x)
 
         mask_scale = mask.sum() / (mask.shape[0] * mask.shape[1])
         

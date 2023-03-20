@@ -15,7 +15,6 @@ import torchaudio
 from tqdm.auto import tqdm
 
 from metts.dataset.data_collator import MeTTSCollator
-from metts.tts.model import MeTTS
 # from metts.dataset.plotting import plot_item, plot_batch_meta
 from metts.dataset.measure import PitchMeasure, EnergyMeasure, SRMRMeasure, SNRMeasure
 
@@ -49,7 +48,7 @@ dl = DataLoader(
     num_workers=96,
 )
 
-model = ConformerConsistencyPredictorWithDVector.from_pretrained("output/checkpoint-406000")
+model = ConformerConsistencyPredictorWithDVector.from_pretrained("models/consistency_scalers_final")
 # eval
 model.eval()
 # disable dropout
@@ -75,9 +74,13 @@ for i, item in tqdm(enumerate(dl)):
         df = pd.DataFrame()
         for j in range(4):
             for k, measure in enumerate(measure_order):
-                df[f"{measure}_y_{j}"] = model.scalers[measure].inverse_transform(model.scalers[measure].transform(item["measures"][measure][j])).numpy().tolist() #+ result["logits"][:, k][j].detach().cpu().numpy().tolist()
-                df[f"{measure}_x_{j}"] = list(range(len(item["measures"][measure][j]))) #+ list(range(len(item["measures"][measure][j])))
-                df[f"{measure}_type_{j}"] = ["ground truth"] * len(item["measures"][measure][j]) # + ["predicted"] * len(item["measures"][measure][j])
+                unscaled_measure_true = item["measures"][measure][j].detach().cpu().numpy().tolist()
+                unscaled_measure_pred = model.scalers[measure].inverse_transform(result["logits"][:, k][j]).detach().cpu().numpy().tolist()
+                scaled_measure_true = model.scalers[measure].transform(item["measures"][measure][j]).detach().cpu().numpy().tolist()
+                scaled_measure_pred = result["logits"][:, k][j].detach().cpu().numpy().tolist()
+                df[f"{measure}_y_{j}"] = scaled_measure_true + scaled_measure_pred
+                df[f"{measure}_x_{j}"] = list(range(len(item["measures"][measure][j]))) + list(range(len(item["measures"][measure][j])))
+                df[f"{measure}_type_{j}"] = ["ground truth"] * len(item["measures"][measure][j]) + ["predicted"] * len(item["measures"][measure][j])
             for measure in measure_order:
                 sns.lineplot(data=df, x=f"{measure}_x_{j}", y=f"{measure}_y_{j}", hue=f"{measure}_type_{j}", alpha=0.8)
                 # add mel spectrogram with extent (in grayscale)
@@ -87,7 +90,7 @@ for i, item in tqdm(enumerate(dl)):
                 frame.set_facecolor('white')
                 plt.savefig(f"examples/new/{j}_{measure}.png")
                 plt.clf()
-    loss_dicts.append(result["loss_dict"])
+    loss_dicts.append(result["compound_losses"])
     if i >= 10:
         break
 

@@ -6,7 +6,7 @@
     "warmup_ratio": 0.001,
     "report_to": "none",
     "max_steps": 500000,
-    "run_name": "final",
+    "run_name": "final_with_scalers",
     "dataloader_num_workers": 96,
     "dataloader_pin_memory": true,
     "remove_unused_columns": false,

@@ -58,7 +58,7 @@ def main(index):
     )
 
     #model = ConsistencyPredictor(ConsistencyPredictorConfig())
-    model = ConformerConsistencyPredictorWithDVector(ConsistencyPredictorConfig())
+    model = ConformerConsistencyPredictorWithDVector.from_pretrained("output/consistency_scalers_final") #(ConsistencyPredictorConfig())
 
     trainer = Trainer(
         model,

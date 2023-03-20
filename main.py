@@ -59,12 +59,7 @@ def main(index):
         keys="all",
     )
 
-    consistency_net = ConformerConsistencyPredictorWithDVector.from_pretrained("models/consistency")
-
-    for scaler in consistency_net.scalers.values():
-        print(scaler.min, scaler._scale, scaler._n)
-    raise
-    # model = FastSpeechWithConsistency.from_pretrained("models/baseline_tts_dvec", consistency_net=consistency_net)
+    consistency_net = ConformerConsistencyPredictorWithDVector.from_pretrained("models/consistency_scalers_final")
     model = FastSpeechWithConsistency(MeTTSConfig(), consistency_net=consistency_net)
 
     trainer = Trainer(

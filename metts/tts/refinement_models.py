@@ -261,14 +261,13 @@ class DiffusionConformer(nn.Module):
 
         if self.sequence_level_outputs > 0:
             self.out_layer_sequence = nn.Sequential(
-                nn.Linear(256, 256),
+                nn.Linear(512, 256),
                 nn.ReLU(),
                 nn.Linear(256, sequence_level_outputs),
             )
 
     def _forward(self, c, step, x_frame, x_sequence=None):
         step_embed = self.step_embed(step)
-
         step_embed = self.step_in(step_embed)
         c = self.conditional_in(c)
         x_frame = self.x_frame_in(x_frame)
@@ -287,10 +286,12 @@ class DiffusionConformer(nn.Module):
             ),
             1
         )
+
         if self.sequence_level_outputs > 0:
             sequence_out = self.out_layer_sequence(sequence_out)
         else:
             sequence_out = None
+
         return frame_out, sequence_out
 
     def forward(self, c, x_frame, x_sequence=None):
@@ -309,7 +310,7 @@ class DiffusionConformer(nn.Module):
         x_frame = (x_frame * noise_scale) + (z_frame * delta)
         
         if x_sequence is not None:
-            x_sequence = (x_sequence * noise_scale) + (z_sequence * delta)
+            x_sequence = (x_sequence * noise_scale.squeeze(-1)) + (z_sequence * delta.squeeze(-1))
         
         step = step.view(batch_size, 1).to(c.device)
 

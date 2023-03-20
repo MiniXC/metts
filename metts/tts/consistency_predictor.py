@@ -70,7 +70,8 @@ class ConformerConsistencyPredictorWithDVector(PreTrainedModel):
             k: GaussianMinMaxScaler(10) for k in self.measures
         }
         self.scaler_dict["mel"] = GaussianMinMaxScaler(10)
-        self.scaler_dict["dvector"] = GaussianMinMaxScaler(10)
+        self.scaler_dict["dvector"] = GaussianMinMaxScaler(10, sqrt=False)
+        self.scaler_dict = nn.ModuleDict(self.scaler_dict)
 
         self.has_teacher = False
 
@@ -129,7 +130,7 @@ class ConformerConsistencyPredictorWithDVector(PreTrainedModel):
                 measure_out = out[:, i]
                 if self.scalers[measure]._n <= 1_000_000:
                     self.scalers[measure].partial_fit(measures[measure])
-                measure_results[measure] = self.scalers[measure].transform(measure_out)
+                measure_results[measure] = measure_out #self.scalers[measure].transform(measure_out)
                 measure_true[measure] = self.scalers[measure].transform(measures[measure])
             measures_loss = 0
             for measure in self.measures:
@@ -151,7 +152,7 @@ class ConformerConsistencyPredictorWithDVector(PreTrainedModel):
         if dvector is not None:
             if self.scalers["dvector"]._n <= 1_000_000:
                 self.scalers["dvector"].partial_fit(dvector)
-            dvector_pred = self.scalers["dvector"].transform(dvector_pred)
+            dvector_pred = dvector_pred # self.scalers["dvector"].transform(
             dvector = self.scalers["dvector"].transform(dvector.clone())
             dvector_loss = nn.MSELoss()(dvector_pred, dvector)
             loss_dict["dvector"] = dvector_loss.detach()
