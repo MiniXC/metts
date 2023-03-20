@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import torch.nn as nn
 
 class GaussianMinMaxScaler(nn.Module):
     """
@@ -11,26 +12,37 @@ class GaussianMinMaxScaler(nn.Module):
     def __init__(self, width, for_tensors=True, floor=1e-6):
         if for_tensors:
             super().__init__()
-            # set as a parameter so that it is saved in the model
-            self._scale = nn.Parameter(requires_grad=False)
-            self._n = nn.Parameter(torch.tensor(0), requires_grad=False)
-            self.max = nn.Parameter(requires_grad=False)
-            self.min = nn.Parameter(requires_grad=False)
-            self.expected_max = nn.Parameter(torch.tensor(width / 2), requires_grad=False)
-            self.floor = nn.Parameter(torch.tensor(floor), requires_grad=False)
+            self.isnan = torch.isnan
         else:
-            self.expected_max = width / 2
-            self.max = None
-            self.min = None
-            self._n = 0
-            self.for_tensors = for_tensors
+            self.isnan = np.isnan
+        expected_max = width / 2
+        _max = float("nan")
+        _min = float("nan")
+        _n = 0
+        for_tensors = for_tensors
+        floor = floor
+        _scale = float("nan")
+        if for_tensors:
+            # register buffers
+            self.register_buffer("max", torch.tensor(_max))
+            self.register_buffer("min", torch.tensor(_min))
+            self.register_buffer("_scale", torch.tensor(_scale))
+            self.register_buffer("expected_max", torch.tensor(expected_max))
+            self.register_buffer("floor", torch.tensor(floor))
+            self.register_buffer("_n", torch.tensor(_n))
+            self.register_buffer("for_tensors", torch.tensor(for_tensors))
+        else:
+            self.max = _max
+            self.min = _min
+            self._scale = _scale
+            self.expected_max = expected_max
             self.floor = floor
-            self._scale = None
+            self._n = _n
+            self.for_tensors = for_tensors
 
     def partial_fit(self, X):
         scale_change = False
-        X = X.flatten()
-        if self.max is None:
+        if self.isnan(self.max):
             self.max = X.max()
             if self.for_tensors:
                 self.max = self.max.detach()
@@ -43,7 +55,7 @@ class GaussianMinMaxScaler(nn.Module):
                 else:
                     self.max = max_candidate
                 scale_change = True
-        if self.min is None:
+        if self.isnan(self.min):
             self.min = X.min()
             if self.for_tensors:
                 self.min = self.min.detach()
@@ -67,7 +79,7 @@ class GaussianMinMaxScaler(nn.Module):
     def transform(self, X):
         X = X - self.min + self.floor
         if self.for_tensors:
-            X = X.clip(min=self.floor)
+            X = X.clip(min=self.floor.item())
             X = torch.sqrt(X)
             # print if any nan values
             if torch.isnan(X).any():

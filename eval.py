@@ -19,14 +19,14 @@ from metts.tts.model import MeTTS
 # from metts.dataset.plotting import plot_item, plot_batch_meta
 from metts.dataset.measure import PitchMeasure, EnergyMeasure, SRMRMeasure, SNRMeasure
 
-from metts.tts.consistency_predictor import ConsistencyPredictor, ConformerConsistencyPredictor, ConformerConsistencyPredictorWithDVector
+from metts.tts.consistency_predictor import ConformerConsistencyPredictorWithDVector
 
 import time
 
 # model = MeTTS.from_pretrained("output/checkpoint-60000")
 # model.eval()
 
-eval_data = load_dataset("metts/dataset/dataset.py", "libritts", split="dev")
+eval_data = load_dataset("metts/dataset/dataset.py", "libritts", split="train")
 
 speaker2idx = json.load(open("data/speaker2idx.json"))
 phone2idx = json.load(open("data/phone2idx.json"))
@@ -43,13 +43,13 @@ collator = MeTTSCollator(
 
 dl = DataLoader(
     eval_data,
-    batch_size=16,
+    batch_size=8,
     collate_fn=collator.collate_fn,
-    shuffle=False,
-    num_workers=16,
+    shuffle=True,
+    num_workers=96,
 )
 
-model = ConformerConsistencyPredictorWithDVector.from_pretrained("models/consistencynet_normalized")
+model = ConformerConsistencyPredictorWithDVector.from_pretrained("output/checkpoint-406000")
 # eval
 model.eval()
 # disable dropout
@@ -60,18 +60,24 @@ loss_dicts = []
 
 for i, item in tqdm(enumerate(dl)):
     mel = item["mel"]
-    result = model(mel) # dvector=item["dvector"])
+    result = model(mel, measures=item["measures"], dvector=item["dvector"])
     # plot predicted measures against ground truth and save to file
     # first we construct a dataframe, then we create one plot per measure (inkl. ground truth and predicted)
     # then we save the plot to a file
     # plot first element in batch for each measure as lineplot and save to file
+    # if i <= 200:
+    #     continue
+    # else:
+    #     # save model 
+    #     model.save_pretrained(f"models/new")
+    #     break
     if i == 0:
         df = pd.DataFrame()
         for j in range(4):
             for k, measure in enumerate(measure_order):
-                df[f"{measure}_y_{j}"] = item["measures"][measure][j].numpy().tolist() + result["logits"][:, k][j].detach().cpu().numpy().tolist()
-                df[f"{measure}_x_{j}"] = list(range(len(item["measures"][measure][j]))) + list(range(len(item["measures"][measure][j])))
-                df[f"{measure}_type_{j}"] = ["ground truth"] * len(item["measures"][measure][j]) + ["predicted"] * len(item["measures"][measure][j])
+                df[f"{measure}_y_{j}"] = model.scalers[measure].inverse_transform(model.scalers[measure].transform(item["measures"][measure][j])).numpy().tolist() #+ result["logits"][:, k][j].detach().cpu().numpy().tolist()
+                df[f"{measure}_x_{j}"] = list(range(len(item["measures"][measure][j]))) #+ list(range(len(item["measures"][measure][j])))
+                df[f"{measure}_type_{j}"] = ["ground truth"] * len(item["measures"][measure][j]) # + ["predicted"] * len(item["measures"][measure][j])
             for measure in measure_order:
                 sns.lineplot(data=df, x=f"{measure}_x_{j}", y=f"{measure}_y_{j}", hue=f"{measure}_type_{j}", alpha=0.8)
                 # add mel spectrogram with extent (in grayscale)

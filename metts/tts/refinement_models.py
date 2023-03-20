@@ -273,11 +273,11 @@ class DiffusionConformer(nn.Module):
         c = self.conditional_in(c)
         x_frame = self.x_frame_in(x_frame)
         x = x_frame + step_embed.unsqueeze(1) + c
+        if x_sequence is not None:
+            x = x + x_sequence.unsqueeze(1)
         x = self.positional_encoding(x)
         out = self.conformer(x)
         frame_out = self.out_layer_frame(x)
-
-        # crashing somewhere before this
 
         # use max + avg pooling to get sequence level conditional embedding
         sequence_out = torch.cat(
@@ -293,8 +293,6 @@ class DiffusionConformer(nn.Module):
             sequence_out = None
         return frame_out, sequence_out
 
-        # TODO: add support for sequence level outputs
-
     def forward(self, c, x_frame, x_sequence=None):
         batch_size = x_frame.shape[0]
         step = torch.randint(low=0, high=self.diff_params["T"], size=(batch_size,1,1))
@@ -302,9 +300,19 @@ class DiffusionConformer(nn.Module):
         noise_scale = self.diff_params["alpha"].to(c.device)[step]
         delta = (1 - noise_scale**2).sqrt()
         
-        z = torch.normal(0, 1, size=x_frame.shape).to(c.device)
+        z_frame = torch.normal(0, 1, size=x_frame.shape).to(c.device)
+        if x_sequence is not None:
+            z_sequence = torch.normal(0, 1, size=x_sequence.shape).to(c.device)
+        else:
+            z_sequence = None
 
-        x_frame = (x_frame * noise_scale) + (z * delta)
+        x_frame = (x_frame * noise_scale) + (z_frame * delta)
+        
+        if x_sequence is not None:
+            x_sequence = (x_sequence * noise_scale) + (z_sequence * delta)
+        
         step = step.view(batch_size, 1).to(c.device)
 
-        return z, *self._forward(c, step, x_frame, x_sequence)
+        result = self._forward(c, step, x_frame, x_sequence)
+
+        return z_frame, result[0], z_sequence, result[1]

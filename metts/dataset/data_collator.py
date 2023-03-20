@@ -262,19 +262,19 @@ class MeTTSCollator():
                 for measure in self.measures:
                     batch[i]["measures"][measure.name] = torch.tensor(batch[i]["measures"][measure.name])
         with torch.no_grad():
-            if any(not os.path.exists(x["audio_path"].replace(".wav", "_speaker.pt")) for x in batch):
-                result["dvector"] = []
-                for x in batch:
-                    try:
-                        embed = self.dvector.model.embed_utterance(self.wav2mel.model(x["audio"].unsqueeze(0), 22050)).squeeze(0)
-                    except RuntimeError:
-                        embed = torch.zeros(256)
-                    result["dvector"].append(embed)
-                for i, x in enumerate(batch):
-                    torch.save(result["dvector"][i], x["audio_path"].replace(".wav", "_speaker.pt"))
-            else:
-                result["dvector"] = torch.stack([torch.load(x["audio_path"].replace(".wav", "_speaker.pt")) for x in batch])
-            result["dvector"] = (result["dvector"] - self.measure_stats["dvector"]["mean"]) / self.measure_stats["dvector"]["std"]
+            # if any(not os.path.exists(x["audio_path"].replace(".wav", "_speaker.pt")) for x in batch):
+            result["dvector"] = []
+            for x in batch:
+                try:
+                    embed = self.dvector.model.embed_utterance(self.wav2mel.model(x["audio"].unsqueeze(0), 22050)).squeeze(0)
+                except RuntimeError:
+                    embed = torch.zeros(256)
+                result["dvector"].append(embed)
+            result["dvector"] = torch.stack(result["dvector"])
+            for i, x in enumerate(batch):
+                torch.save(result["dvector"][i], x["audio_path"].replace(".wav", "_speaker.pt"))
+            # else:
+            #     result["dvector"] = torch.stack([torch.load(x["audio_path"].replace(".wav", "_speaker.pt")) for x in batch])
             torch.cuda.empty_cache()
         result["audio"] = pad_sequence([x["audio"] for x in batch], batch_first=True)
         result["mel"] = pad_sequence([x["mel"] for x in batch], batch_first=True)
@@ -559,7 +559,7 @@ class FastSpeechWithConsistencyCollator():
         mel = torch.sqrt(mel)
         mel = torch.matmul(self.mel_basis, mel)
         mel = MeTTSCollator.drc(mel)
-        mel = (mel - self.measure_stats["mel"]["mean"]) / self.measure_stats["mel"]["std"]
+        # mel = (mel - self.measure_stats["mel"]["mean"]) / self.measure_stats["mel"]["std"]
         batch["mel"] = mel.permute(0, 2, 1)
         
 

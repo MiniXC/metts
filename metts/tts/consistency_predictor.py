@@ -32,6 +32,8 @@ class ConformerConsistencyPredictorWithDVector(PreTrainedModel):
         depthwise = lco["consistency"]["depthwise"]
         num_outputs = len(self.measures)
 
+        self.loss_compounds = self.measures + ["dvector"]
+        
         self.in_layer = nn.Linear(in_channels, filter_size)
 
         self.positional_encoding = PositionalEncoding(filter_size)
@@ -67,6 +69,7 @@ class ConformerConsistencyPredictorWithDVector(PreTrainedModel):
         self.scaler_dict = {
             k: GaussianMinMaxScaler(10) for k in self.measures
         }
+        self.scaler_dict["mel"] = GaussianMinMaxScaler(10)
         self.scaler_dict["dvector"] = GaussianMinMaxScaler(10)
 
         self.has_teacher = False
@@ -94,17 +97,21 @@ class ConformerConsistencyPredictorWithDVector(PreTrainedModel):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def forward(self, mel, dvector=None, measures=None):
-        x = self.in_layer(mel)
+    def forward(self, mel, dvector=None, measures=None, inference=False):
+        if self.scalers["mel"]._n <= 10_000_000:
+            self.scalers["mel"].partial_fit(mel)
+        x = self.scalers["mel"].transform(mel)
+        x = self.in_layer(x)
         x = self.positional_encoding(x)
         out_conv = self.layers(x)
         out = self.linear(out_conv)
         out = out.transpose(1, 2)
         measure_results = {}
+        measure_true = {}
         loss = 0
         loss_dict = {}
-        assert not (self.has_teacher and (measures is not None or dvector is not None))
-        assert (self.has_teacher or (measures is not None and dvector is not None))
+        assert not (self.has_teacher and (measures is not None))
+        assert (self.has_teacher or (measures is not None) or inference)
         ### teacher distillation
         if self.has_teacher:
             measures_loss = 0
@@ -123,11 +130,11 @@ class ConformerConsistencyPredictorWithDVector(PreTrainedModel):
                 if self.scalers[measure]._n <= 1_000_000:
                     self.scalers[measure].partial_fit(measures[measure])
                 measure_results[measure] = self.scalers[measure].transform(measure_out)
-                measures[measure] = self.scalers[measure].transform(measure_out)
+                measure_true[measure] = self.scalers[measure].transform(measures[measure])
             measures_loss = 0
             for measure in self.measures:
-                m_loss = nn.MSELoss()(measure_results[measure], measures[measure])
-                loss_dict[measure] = m_loss
+                m_loss = nn.MSELoss()(measure_results[measure], measure_true[measure])
+                loss_dict[measure] = m_loss.detach()
                 measures_loss += m_loss
             loss = measures_loss / len(self.measures)
             loss = loss + measures_loss / len(self.measures)
@@ -145,54 +152,15 @@ class ConformerConsistencyPredictorWithDVector(PreTrainedModel):
             if self.scalers["dvector"]._n <= 1_000_000:
                 self.scalers["dvector"].partial_fit(dvector)
             dvector_pred = self.scalers["dvector"].transform(dvector_pred)
-            dvector = self.scalers["dvector"].transform(dvector)
+            dvector = self.scalers["dvector"].transform(dvector.clone())
             dvector_loss = nn.MSELoss()(dvector_pred, dvector)
-            loss_dict["dvector"] = dvector_loss
+            loss_dict["dvector"] = dvector_loss.detach()
             loss = loss + dvector_loss
         return {
             "loss": loss,
-            "loss_dict": loss_dict,
+            "compound_losses": loss_dict,
             "measures": {m: self.scalers[m].inverse_transform(out[:, i]) for i, m in enumerate(self.measures)},
             "dvector": self.scalers["dvector"].inverse_transform(dvector_pred),
             "logits": out,
             "logits_dvector": dvector_pred,
         }
-
-class VarianceConvolutionLayer(nn.Module):
-    def __init__(self, in_channels, filter_size, kernel_size, dropout, depthwise):
-        super().__init__()
-        if not depthwise:
-            self.layers = nn.Sequential(
-                Transpose(
-                    nn.Conv1d(
-                        in_channels,
-                        filter_size,
-                        kernel_size,
-                        padding=(kernel_size - 1) // 2,
-                    )
-                ),
-                nn.ReLU(),
-                nn.LayerNorm(filter_size),
-                nn.Dropout(dropout),
-            )
-        else:
-            self.layers = nn.Sequential(
-                Transpose(
-                    nn.Sequential(
-                        nn.Conv1d(
-                            in_channels,
-                            in_channels,
-                            kernel_size,
-                            padding=(kernel_size - 1) // 2,
-                            groups=in_channels,
-                        ),
-                        nn.Conv1d(in_channels, filter_size, 1),
-                    )
-                ),
-                nn.ReLU(),
-                nn.LayerNorm(filter_size),
-                nn.Dropout(dropout),
-            )
-
-    def forward(self, x):
-        return self.layers(x)

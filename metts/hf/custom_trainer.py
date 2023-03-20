@@ -1727,6 +1727,11 @@ class Trainer:
         tr_loss = torch.tensor(0.0).to(args.device)
         # _total_loss_scalar is updated everytime .item() has to be called on tr_loss and stores the sum of all losses
         self._total_loss_scalar = 0.0
+        if hasattr(model, "loss_compounds"):
+            tr_loss_compounds = {k: torch.tensor(0.0).to(args.device) for k in model.loss_compounds}
+            self._total_loss_compounds_scalar = {k: 0.0 for k in model.loss_compounds}
+        else:
+            tr_loss_compounds = None
         self._globalstep_last_logged = self.state.global_step
         model.zero_grad()
 
@@ -1804,9 +1809,17 @@ class Trainer:
                 ):
                     # Avoid unnecessary DDP synchronization since there will be no backward pass on this example.
                     with model.no_sync():
-                        tr_loss_step = self.training_step(model, inputs)
+                        tr_loss_step, compounds = self.training_step(model, inputs)
+                        if tr_loss_compounds is not None:
+                            tr_loss_compound_step = {
+                                k: compounds[k] for k, v in tr_loss_compounds.items()
+                            }
                 else:
-                    tr_loss_step = self.training_step(model, inputs)
+                    tr_loss_step, compounds = self.training_step(model, inputs)
+                    if tr_loss_compounds is not None:
+                        tr_loss_compound_step = {
+                            k: compounds[k] for k, v in tr_loss_compounds.items()
+                        }
 
                 if (
                     args.logging_nan_inf_filter
@@ -1814,8 +1827,14 @@ class Trainer:
                     and (torch.isnan(tr_loss_step) or torch.isinf(tr_loss_step))
                 ):
                     # if loss is nan or inf simply add the average of previous logged losses
+                    if tr_loss_compounds is not None:
+                        for k, v in tr_loss_compounds.items():
+                            tr_loss_compounds[k] += tr_loss_compounds[k] / (1 + self.state.global_step - self._globalstep_last_logged)
                     tr_loss += tr_loss / (1 + self.state.global_step - self._globalstep_last_logged)
                 else:
+                    if tr_loss_compounds is not None:
+                        for k, v in tr_loss_compounds.items():
+                            tr_loss_compounds[k] += tr_loss_compound_step[k]
                     tr_loss += tr_loss_step
 
                 self.current_flos += float(self.floating_point_ops(inputs))
@@ -1882,8 +1901,8 @@ class Trainer:
                     self.state.global_step += 1
                     self.state.epoch = epoch + (step + 1) / steps_in_epoch
                     self.control = self.callback_handler.on_step_end(args, self.state, self.control)
-
-                    self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval)
+                    
+                    self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval, tr_loss_compounds)
                 else:
                     self.control = self.callback_handler.on_substep_end(args, self.state, self.control)
 
@@ -1898,7 +1917,8 @@ class Trainer:
                 self.control.should_training_stop = True
 
             self.control = self.callback_handler.on_epoch_end(args, self.state, self.control)
-            self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval)
+
+            self._maybe_log_save_evaluate(tr_loss, model, trial, epoch, ignore_keys_for_eval, tr_loss_compounds)
 
             if DebugOption.TPU_METRICS_DEBUG in self.args.debug:
                 if is_torch_tpu_available():
@@ -1931,11 +1951,18 @@ class Trainer:
         # add remaining tr_loss
         self._total_loss_scalar += tr_loss.item()
         train_loss = self._total_loss_scalar / self.state.global_step
+        if self._total_loss_scalar_compounds is not None:
+            for k, v in tr_loss_compounds.items():
+                self._total_loss_scalar_compounds[k] += v.item()
+            train_loss_compounds = {f"{k}_train_loss": v / self.state.global_step for k, v in self._total_loss_scalar_compounds.items()}
+
 
         metrics = speed_metrics("train", start_time, num_samples=num_train_samples, num_steps=self.state.max_steps)
         self.store_flos()
         metrics["total_flos"] = self.state.total_flos
         metrics["train_loss"] = train_loss
+        if train_loss_compounds is not None:
+            metrics.update(train_loss_compounds)
 
         self.is_in_train = False
 
@@ -2114,7 +2141,7 @@ class Trainer:
                 f"There were unexpected keys in the checkpoint model loaded: {load_result.unexpected_keys}."
             )
 
-    def _maybe_log_save_evaluate(self, tr_loss, model, trial, epoch, ignore_keys_for_eval):
+    def _maybe_log_save_evaluate(self, tr_loss, model, trial, epoch, ignore_keys_for_eval, compound_losses=None):
         if self.control.should_log:
             if is_torch_tpu_available():
                 xm.mark_step()
@@ -2128,6 +2155,14 @@ class Trainer:
             tr_loss -= tr_loss
 
             logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
+
+            if compound_losses is not None:
+                for k, v in compound_losses.items():
+                    c_loss = self._nested_gather(v).mean().item()
+                    # reset to zero
+                    compound_losses[k] -= v
+                    logs[k] = round(c_loss / (self.state.global_step - self._globalstep_last_logged), 4)
+
             logs["learning_rate"] = self._get_learning_rate()
 
             self._total_loss_scalar += tr_loss_scalar
@@ -2554,14 +2589,18 @@ class Trainer:
             return loss_mb.reduce_mean().detach().to(self.args.device)
 
         with self.compute_loss_context_manager():
-            loss = self.compute_loss(model, inputs)
+            loss, compound_losses = self.compute_loss(model, inputs)
 
         if self.args.n_gpu > 1:
             loss = loss.mean()  # mean() to average on multi-gpu parallel training
+            if compound_losses is not None:
+                compound_losses = {k: v.mean() for k, v in compound_losses.items()}
 
         if self.args.gradient_accumulation_steps > 1 and not self.deepspeed:
             # deepspeed handles loss scaling by gradient_accumulation_steps in its `backward`
             loss = loss / self.args.gradient_accumulation_steps
+            if compound_losses is not None:
+                compound_losses = {k: v / self.args.gradient_accumulation_steps for k, v in compound_losses.items()}
 
         if self.do_grad_scaling:
             self.scaler.scale(loss).backward()
@@ -2575,7 +2614,7 @@ class Trainer:
             loss.backward()
 
         loss = loss.detach()
-        return loss
+        return loss, compound_losses
 
     def compute_loss(self, model, inputs, return_outputs=False):
         """
@@ -2588,6 +2627,10 @@ class Trainer:
         else:
             labels = None
         outputs = model(**inputs)
+        if "compound_losses" in outputs:
+            compound_losses = outputs["compound_losses"]
+        else:
+            compound_losses = None
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
         if self.args.past_index >= 0:
@@ -2607,7 +2650,7 @@ class Trainer:
             # We don't use .loss here since the model may return tuples instead of ModelOutput.
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
 
-        return (loss, outputs) if return_outputs else loss
+        return (loss, compound_losses, outputs) if return_outputs else loss, compound_losses
 
     def is_local_process_zero(self) -> bool:
         """
@@ -3290,7 +3333,7 @@ class Trainer:
             else:
                 if has_labels or loss_without_labels:
                     with self.compute_loss_context_manager():
-                        loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
+                        loss, compound_losses, outputs = self.compute_loss(model, inputs, return_outputs=True)
                     loss = loss.mean().detach()
 
                     if isinstance(outputs, dict):
