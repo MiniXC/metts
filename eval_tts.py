@@ -16,10 +16,9 @@ from tqdm.auto import tqdm
 import soundfile as sf
 
 from metts.dataset.data_collator import MeTTSCollator, FastSpeechWithConsistencyCollator
-from metts.tts.model import MeTTS
 from metts.tts.model import FastSpeechWithConsistency
 
-from metts.tts.consistency_predictor import ConformerConsistencyPredictor, ConformerConsistencyPredictorWithDVector
+from metts.tts.consistency_predictor import ConformerConsistencyPredictorWithDVector
 import time
 
 from metts.hifigan import Synthesiser
@@ -49,8 +48,8 @@ dl = DataLoader(
     num_workers=96,
 )
 
-consistency_net = ConformerConsistencyPredictorWithDVector.from_pretrained("models/consistencynet_small")
-model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-3000", consistency_net=consistency_net)
+consistency_net = ConformerConsistencyPredictorWithDVector.from_pretrained("pretrained_models/consistency")
+model = FastSpeechWithConsistency.from_pretrained("models/tts_full_12k", consistency_net=consistency_net)
 
 # eval
 #model.eval()
@@ -65,13 +64,13 @@ for i, item in tqdm(enumerate(dl), total=len(dl)):
     # print(max_phone_length)
 
     mel = item["mel"]
-    # denormalise
-    mel = mel * 1.0958075523376465 + -0.19927863776683807
+    # noralize mel
+    # mel = model.con.scalers["mel"].transform(mel)
 
     result_inf = model(
         item["phones"],
         item["phone_durations"],
-        item["durations"].half(),
+        item["durations"],
         item["mel"],
         item["val_ind"],
         item["speaker"],
@@ -81,7 +80,7 @@ for i, item in tqdm(enumerate(dl), total=len(dl)):
     result_tf = model(
         item["phones"],
         item["phone_durations"],
-        item["durations"].half(),
+        item["durations"],
         item["mel"],
         item["val_ind"],
         item["speaker"],
@@ -91,7 +90,7 @@ for i, item in tqdm(enumerate(dl), total=len(dl)):
     # mel_shape (batch, mel_len, mel_dim)
     # mask such that only sections with 0s are masked
     mask = result_inf["mask"].squeeze(-1)
-    synth_mel = result_inf["mel"][0].T[mask[0]]
+    synth_mel = result_inf["mel"][0][mask[0]]
     audio = synth(synth_mel)
     if len(audio.shape) == 1:
         audio = torch.tensor(audio).unsqueeze(0)
@@ -106,22 +105,22 @@ for i, item in tqdm(enumerate(dl), total=len(dl)):
     plt.imshow(item["mel"][0].T, aspect="auto", origin="lower", vmin=mel_min, vmax=mel_max)
     plt.title("Ground Truth")
     plt.subplot(3, 1, 2)
-    plt.imshow(result_tf["mel"][0].detach().numpy(), aspect="auto", origin="lower", vmin=mel_min, vmax=mel_max)
+    plt.imshow(result_tf["mel"][0].detach().numpy().T, aspect="auto", origin="lower", vmin=mel_min, vmax=mel_max)
     plt.title("Predicted (TF)")
     plt.subplot(3, 1, 3)
-    plt.imshow(result_inf["mel"][0].detach().numpy(), aspect="auto", origin="lower", vmin=mel_min, vmax=mel_max)
+    plt.imshow(result_inf["mel"][0].detach().numpy().T, aspect="auto", origin="lower", vmin=mel_min, vmax=mel_max)
     plt.title("Predicted (Inf)")
 
     # save to examples
-    plt.savefig(f"examples/{i}_mel_tf_disc.png")
+    plt.savefig(f"examples/{i}_mel_tts.png")
 
     print("inference mode losses")
-    for loss in result_inf["loss_dict"]:
-        print(loss, result_inf["loss_dict"][loss].item())
+    for loss in result_inf["compound_losses"]:
+        print(loss, result_inf["compound_losses"][loss].item())
 
     print("force tf mode losses")
-    for loss in result_tf["loss_dict"]:
-        print(loss, result_tf["loss_dict"][loss].item())
+    for loss in result_tf["compound_losses"]:
+        print(loss, result_tf["compound_losses"][loss].item())
 
     if i == 4:
         break

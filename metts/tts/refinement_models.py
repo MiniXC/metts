@@ -5,6 +5,7 @@ from torch import nn
 import torch.nn.functional as F
 import lco
 import numpy as np
+from tqdm.auto import tqdm
 
 from .transformer import TransformerEncoder, PositionalEncoding
 from .conformer_layer import ConformerLayer
@@ -124,15 +125,15 @@ class DiffusionSampler():
         N = len(steps_infer)
 
         xs = [
-                torch.normal(0, 1, size=(batch_size, sequence_length, self.model.frame_level_outputs)).to(c.device),
+                torch.normal(0, 1, size=(batch_size, sequence_length, self.model.frame_level_outputs)).to(device=c.device, dtype=c.dtype),
             ]
 
         if self.model.sequence_level_outputs > 0:
-            xs.append(torch.normal(0, 1, size=(batch_size, self.model.sequence_level_outputs)).to(c.device))
+            xs.append(torch.normal(0, 1, size=(batch_size, self.model.sequence_level_outputs)).to(device=c.device, dtype=c.dtype))
  
         with torch.no_grad():
-            for n in range(N - 1, -1, -1):
-                step = (steps_infer[n] * torch.ones((batch_size, 1))).to(c.device)
+            for n in tqdm(range(N - 1, -1, -1), desc="Diffusion sampling"):
+                step = (steps_infer[n] * torch.ones((batch_size, 1))).to(device=c.device, dtype=c.dtype)
                 if self.model.sequence_level_outputs > 0:
                     es = self.model._forward(c, step, xs[0], xs[1])
                 else:
@@ -142,7 +143,7 @@ class DiffusionSampler():
                     xs[i] = xs[i] / torch.sqrt(1 - beta_infer[n])
                 if n > 0:
                     if i in range(len(xs)):
-                        z = torch.normal(0, 1, size=xs[i].shape).to(c.device)
+                        z = torch.normal(0, 1, size=xs[i].shape).to(device=c.device, dtype=c.dtype)
                         xs[i] = xs[i] + sigma_infer[n] * z
 
         frame_pred = xs[0]
@@ -298,12 +299,12 @@ class DiffusionConformer(nn.Module):
         batch_size = x_frame.shape[0]
         step = torch.randint(low=0, high=self.diff_params["T"], size=(batch_size,1,1))
         
-        noise_scale = self.diff_params["alpha"].to(c.device)[step]
+        noise_scale = self.diff_params["alpha"].to(device=c.device, dtype=c.dtype)[step]
         delta = (1 - noise_scale**2).sqrt()
         
-        z_frame = torch.normal(0, 1, size=x_frame.shape).to(c.device)
+        z_frame = torch.normal(0, 1, size=x_frame.shape).to(device=c.device, dtype=c.dtype)
         if x_sequence is not None:
-            z_sequence = torch.normal(0, 1, size=x_sequence.shape).to(c.device)
+            z_sequence = torch.normal(0, 1, size=x_sequence.shape).to(device=c.device, dtype=c.dtype)
         else:
             z_sequence = None
 

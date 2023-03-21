@@ -150,9 +150,6 @@ from transformers.utils import (
 )
 from transformers.utils.generic import ContextManagers
 
-_device_prefetch_size = 4
-_loader_prefetch_size = 8 # 100
-_prefetch_factor=5
 
 _is_native_cpu_amp_available = is_torch_greater_or_equal_than_1_10
 
@@ -844,7 +841,6 @@ class Trainer:
                     drop_last=self.args.dataloader_drop_last,
                     num_processes=self.args.world_size,
                     process_index=self.args.process_index,
-                    prefetch_factor=_prefetch_factor,
                 )
 
             return DataLoader(
@@ -853,7 +849,6 @@ class Trainer:
                 collate_fn=data_collator,
                 num_workers=self.args.dataloader_num_workers,
                 pin_memory=self.args.dataloader_pin_memory,
-                prefetch_factor=_prefetch_factor,
             )
 
         train_sampler = self._get_train_sampler()
@@ -867,7 +862,6 @@ class Trainer:
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.dataloader_pin_memory,
             worker_init_fn=seed_worker,
-            prefetch_factor=_prefetch_factor,
         )
 
     def _get_eval_sampler(self, eval_dataset: Dataset) -> Optional[torch.utils.data.Sampler]:
@@ -928,7 +922,6 @@ class Trainer:
                     drop_last=self.args.dataloader_drop_last,
                     num_processes=self.args.world_size,
                     process_index=self.args.process_index,
-                    prefetch_factor=_prefetch_factor,
                 )
             return DataLoader(
                 eval_dataset,
@@ -936,7 +929,6 @@ class Trainer:
                 collate_fn=data_collator,
                 num_workers=self.args.dataloader_num_workers,
                 pin_memory=self.args.dataloader_pin_memory,
-                prefetch_factor=_prefetch_factor,
             )
 
         eval_sampler = self._get_eval_sampler(eval_dataset)
@@ -949,7 +941,6 @@ class Trainer:
             drop_last=self.args.dataloader_drop_last,
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.dataloader_pin_memory,
-            prefetch_factor=_prefetch_factor,
         )
 
     def get_test_dataloader(self, test_dataset: Dataset) -> DataLoader:
@@ -978,7 +969,6 @@ class Trainer:
                     drop_last=self.args.dataloader_drop_last,
                     num_processes=self.args.world_size,
                     process_index=self.args.process_index,
-                    prefetch_factor=_prefetch_factor,
                 )
             return DataLoader(
                 test_dataset,
@@ -986,7 +976,6 @@ class Trainer:
                 collate_fn=data_collator,
                 num_workers=self.args.dataloader_num_workers,
                 pin_memory=self.args.dataloader_pin_memory,
-                prefetch_factor=_prefetch_factor,
             )
 
         test_sampler = self._get_eval_sampler(test_dataset)
@@ -1000,7 +989,6 @@ class Trainer:
             drop_last=self.args.dataloader_drop_last,
             num_workers=self.args.dataloader_num_workers,
             pin_memory=self.args.dataloader_pin_memory,
-            prefetch_factor=_prefetch_factor,
         )
 
     def create_optimizer_and_scheduler(self, num_training_steps: int):
@@ -1763,8 +1751,6 @@ class Trainer:
                 parallel_loader = ParallelLoader(
                     train_dataloader,
                     [args.device],
-                    device_prefetch_size=_device_prefetch_size,
-                    loader_prefetch_size=_loader_prefetch_size,
                 ).per_device_loader(args.device)
                 epoch_iterator = parallel_loader
             else:
