@@ -30,6 +30,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
 
         self.loss_compounds = [
             "mel",
+            "mel_diff",
             "duration_predictor",
             "duration_predictor_diff",
             "energy_predictor",
@@ -302,16 +303,16 @@ class FastSpeechWithConsistency(PreTrainedModel):
 
         ### Mel Loss
         x = x * mask
-        mel = mel * mask
-        mel = mel.transpose(1, 2)
+        norm_mel = norm_mel * mask
+        norm_mel = norm_mel.transpose(1, 2)
         x = x.transpose(1, 2)
-        loss_dict["mel"] = nn.MSELoss()(x, mel)
+        loss_dict["mel"] = nn.MSELoss()(x, norm_mel)
 
         ### Mel Diffusion
         mel_diffuser_input = torch.cat([hidden, x.transpose(1, 2)], dim=-1)
 
-        true_mel_noise, pred_mel_noise, _, _ = self.mel_diffuser(mel_diffuser_input, mel.transpose(1, 2))
-        loss_dict["mel_diffusion"] = nn.MSELoss()(pred_mel_noise, true_mel_noise)
+        true_mel_noise, pred_mel_noise, _, _ = self.mel_diffuser(mel_diffuser_input, norm_mel.transpose(1, 2))
+        loss_dict["mel_diff"] = nn.MSELoss()(pred_mel_noise, true_mel_noise)
 
         ### Mel Samplingq
         if inference:
