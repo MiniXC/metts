@@ -124,14 +124,6 @@ class MeTTSCollator():
     def collate_fn(self, batch):
         result = {}
 
-        # audio_torch, sr = torchaudio.load(batch[0]["audio"]["path"])
-        # audio_hf = batch[0]["audio"]["array"]
-
-        # print("audio_torch", audio_torch.shape, audio_torch.dtype, audio_torch.min(), audio_torch.max())
-        # print("audio_hf", audio_hf.shape, audio_hf.dtype, audio_hf.min(), audio_hf.max())
-
-        # raise
-
         for i, row in enumerate(batch):
             phones = row["phones"]
             batch[i]["phones"] = np.array([self.phone2idx[phone.replace("ˌ", "")] for phone in row["phones"]])
@@ -178,7 +170,6 @@ class MeTTSCollator():
             mel = torch.sqrt(mel[0])
             mel = torch.matmul(self.mel_basis, mel)
             mel = MeTTSCollator.drc(mel)
-            mel = (mel - self.measure_stats["mel"]["mean"]) / self.measure_stats["mel"]["std"]
 
             batch[i]["mel"] = mel.T
             if batch[i]["mel"].shape[0] > new_mel_len:
@@ -186,14 +177,10 @@ class MeTTSCollator():
             if batch[i]["mel"].shape[0] < new_mel_len:
                 batch[i]["mel"] = torch.cat([batch[i]["mel"], torch.zeros(1, batch[i]["mel"].shape[1])])
             
-            # batch[i]["mel"] = batch[i]["mel"][~duration_mask_rm_exp_frame]
-            
             unexpanded_silence_mask = ["[" in p for p in phones]
             silence_mask = self._expand(unexpanded_silence_mask, durations)
             batch[i]["phone_durations"] = durations.copy()
-            durations = durations + (np.random.rand(*durations.shape)) #+ 1e-5
-            # durations = np.log(durations)
-            # durations = (durations - self.measure_stats["duration"]["mean"]) / self.measure_stats["duration"]["std"]
+            durations = durations + (np.random.rand(*durations.shape))
             batch[i]["durations"] = durations
             if self.measures is not None:
                 measure_paths = {
@@ -210,17 +197,10 @@ class MeTTSCollator():
                         measure.name: measure(batch[i]["audio"], row["phone_durations"], silence_mask, True)
                         for measure in self.measures
                     }
-                    # measures = {
-                    #     key: np.log(value["measure"] + 1e-5) # (value["measure"] - self.measure_stats[key]["mean"]) / self.measure_stats[key]["std"]
-                    #     for key, value in measure_dict.items()
-                    # }
                     measures = {
-                        key: (value["measure"])# - self.measure_stats[key]["mean"]) / self.measure_stats[key]["std"]
+                        key: (value["measure"])
                         for key, value in measure_dict.items()
                     }
-                    for measure in self.measures:
-                        with open(measure_paths[measure.name], "wb") as f:
-                            pickle.dump(measures[measure.name], f)
                 batch[i]["measures"] = measures
             batch[i]["audio_path"] = audio_path
         max_frame_length = max([sum(x["phone_durations"]) for x in batch])
@@ -262,7 +242,6 @@ class MeTTSCollator():
                 for measure in self.measures:
                     batch[i]["measures"][measure.name] = torch.tensor(batch[i]["measures"][measure.name])
         with torch.no_grad():
-            # if any(not os.path.exists(x["audio_path"].replace(".wav", "_speaker.pt")) for x in batch):
             result["dvector"] = []
             for x in batch:
                 try:
@@ -271,10 +250,6 @@ class MeTTSCollator():
                     embed = torch.zeros(256)
                 result["dvector"].append(embed)
             result["dvector"] = torch.stack(result["dvector"])
-            for i, x in enumerate(batch):
-                torch.save(result["dvector"][i], x["audio_path"].replace(".wav", "_speaker.pt"))
-            # else:
-            #     result["dvector"] = torch.stack([torch.load(x["audio_path"].replace(".wav", "_speaker.pt")) for x in batch])
             torch.cuda.empty_cache()
         result["audio"] = pad_sequence([x["audio"] for x in batch], batch_first=True)
         result["mel"] = pad_sequence([x["mel"] for x in batch], batch_first=True)
@@ -286,15 +261,6 @@ class MeTTSCollator():
         # speaker2idx
         result["speaker"] = torch.tensor([self.speaker2idx[x] for x in speakers])
         result["measures"] = {}
-
-        # NOT WORKING DUE TO MEL COMP CHANGE
-        # result["vocoder_mask"] = torch.zeros((max_frame_length))
-        # result["vocoder_mask"][random_min_frame_length:lco["max_lengths"]["vocoder"]+random_min_frame_length] = 1
-        # result["vocoder_mask"] = result["vocoder_mask"].bool()
-        # audio_min_idx = random_min_frame_length*lco["audio"]["hop_length"]
-        # audio_max_idx = (lco["max_lengths"]["vocoder"]+random_min_frame_length)*lco["audio"]["hop_length"]
-        # result["vocoder_audio"] = result["audio"][:,audio_min_idx:audio_max_idx]
-        # result["vocoder_mel"] = result["mel"].transpose(1,2)[:, :, result["vocoder_mask"]]
 
         if not self.include_audio:
             del result["audio"]
@@ -310,93 +276,14 @@ class MeTTSCollator():
         if self.measures is not None:
             for measure in self.measures:
                 result["measures"][measure.name] = pad_sequence([x["measures"][measure.name] for x in batch], batch_first=True)
-                # result["means"][measure.name] = torch.tensor([x["measures"][measure.name]["mean"] for x in batch])
-                # result["stds"][measure.name] = torch.tensor([x["measures"][measure.name]["std"] for x in batch])
         else:
             result["measures"] = None
-
-        # result["means"]["duration"] = torch.tensor(duration_means)
-        # result["stds"]["duration"] = torch.tensor(duration_stds)
-        # # audio
-        # result["means"]["audio"] = torch.tensor(audio_means)
-        # result["stds"]["audio"] = torch.tensor(audio_stds)
-        # # mel
-        # result["means"]["mel"] = torch.tensor(mel_means)
-        # result["stds"]["mel"] = torch.tensor(mel_stds)
-
-        # for k in result["means"]:
-        #     result["means"][k] = (result["means"][k] - self.measure_stats[k]["mean"][0]) / self.measure_stats[k]["mean"][1]
-        #     result["stds"][k] = (result["stds"][k] - self.measure_stats[k]["std"][0]) / self.measure_stats[k]["std"][1]
 
         result = {
             k: v
             for k, v in result.items()
             if k in self.keys
         }
-
-        return result
-
-class VocoderCollator():
-    def __init__(
-        self,
-        include_audio=False,
-    ):
-        self.sampling_rate = lco["audio"]["sampling_rate"]
-        self.include_audio = include_audio
-
-    @staticmethod
-    def drc(x, C=1, clip_val=1e-5, log10=True):
-        """Dynamic Range Compression"""
-        if log10:
-            return torch.log10(torch.clamp(x, min=clip_val) * C)
-        else:
-            return torch.log(torch.clamp(x, min=clip_val) * C)
-        
-    def collate_fn(self, batch):
-        result = {}
-
-        chunk_length = lco["max_lengths"]["vocoder"]
-        hop_length = lco["audio"]["hop_length"]
-
-        full_audios = []
-        audios = []
-
-        for i, row in enumerate(batch):
-            sr = lco["audio"]["sampling_rate"]
-            start = int(sr * row["start"])
-            end = int(sr * row["end"])
-            audio, _sr = torchaudio.load(row["audio"])
-            # resample
-            if _sr != sr:
-                if not hasattr(self, "_resampler"):
-                    self._resampler = torchaudio.transforms.Resample(_sr, sr)
-                audio = self._resampler(audio)
-            audio = audio[0][start:end]
-
-            # normalize audio
-            audio = (audio - audio.mean()) / audio.std()
-
-            # if self.include_audio:
-            #     full_audios.append(audio)
-            
-            # get random chunk of audio
-            audio_length = audio.shape[0]
-            if (audio_length/hop_length)-chunk_length <= 0:
-                # pad by chunk_length*hop_length-audio_length using torch
-                audio = torch.nn.functional.pad(audio, (0, int(chunk_length*hop_length-audio_length)))
-            else:
-                if (audio_length//hop_length)-chunk_length <= 0:
-                    start = 0
-                else:
-                    start = np.random.randint(0, (audio_length//hop_length)-chunk_length)
-                audio = audio[start*hop_length:(start+chunk_length)*hop_length]
-
-            audios.append(audio)
-
-        result["audio"] = torch.tensor(np.stack(audios))
-
-        # if self.include_audio:
-        #     result["full_audio"] = torch.tensor(np.stack(full_audios))
 
         return result
 
@@ -513,7 +400,6 @@ class FastSpeechWithConsistencyCollator():
             batch[i]["audio"] = audio[~duration_mask_rm_exp]
             batch[i]["phone_durations"] = durations.copy()
             durations = durations + (np.random.rand(*durations.shape) - 0.5)
-            durations = (durations - self.measure_stats["duration"]["mean"]) / self.measure_stats["duration"]["std"]
             batch[i]["durations"] = durations
             batch[i]["audio_path"] = audio_path
 
@@ -559,7 +445,6 @@ class FastSpeechWithConsistencyCollator():
         mel = torch.sqrt(mel)
         mel = torch.matmul(self.mel_basis, mel)
         mel = MeTTSCollator.drc(mel)
-        # mel = (mel - self.measure_stats["mel"]["mean"]) / self.measure_stats["mel"]["std"]
         batch["mel"] = mel.permute(0, 2, 1)
         
 

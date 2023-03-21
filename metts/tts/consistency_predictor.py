@@ -102,6 +102,7 @@ class ConformerConsistencyPredictorWithDVector(PreTrainedModel):
         if self.scalers["mel"]._n <= 10_000_000:
             self.scalers["mel"].partial_fit(mel)
         x = self.scalers["mel"].transform(mel)
+        x = x + torch.randn_like(x) * lco["consistency"]["noise_factor"]
         x = self.in_layer(x)
         x = self.positional_encoding(x)
         out_conv = self.layers(x)

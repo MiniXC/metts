@@ -18,6 +18,7 @@ diffusion:
   step_embed_dim_hidden: 512
 meta: [duration, mel, audio, energy, pitch, srmr, snr]
 consistency:
+  noise_factor: 0.1
   nlayers: 6
   in_channels: 80
   filter_size: 256

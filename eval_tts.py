@@ -49,7 +49,7 @@ dl = DataLoader(
 )
 
 consistency_net = ConformerConsistencyPredictorWithDVector.from_pretrained("pretrained_models/consistency")
-model = FastSpeechWithConsistency.from_pretrained("models/tts_full_12k", consistency_net=consistency_net)
+model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-2000", consistency_net=consistency_net)
 
 # eval
 #model.eval()
@@ -65,7 +65,13 @@ for i, item in tqdm(enumerate(dl), total=len(dl)):
 
     mel = item["mel"]
     # noralize mel
-    # mel = model.con.scalers["mel"].transform(mel)
+    mel = model.con.scalers["mel"].transform(mel)
+    mel = mel + torch.randn_like(mel) * 0.1
+
+    plt.figure(figsize=(20, 10))
+    plt.imshow(mel[0].T)
+    plt.savefig("mel.png")
+    raise
 
     result_inf = model(
         item["phones"],
