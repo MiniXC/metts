@@ -1,5 +1,5 @@
 {
-  "_name_or_path": "output/checkpoint-3000",
+  "_name_or_path": "pretrained_models/consistency",
   "architectures": [
     "ConformerConsistencyPredictorWithDVector"
   ],
