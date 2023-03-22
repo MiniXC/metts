@@ -7,6 +7,8 @@ audio:
 max_lengths:
   phone: 384
   frame: 512
+conformer:
+  depthwise: False
 measures:
   silence_mask: False
 diffusion:
@@ -29,7 +31,7 @@ consistency:
   measures: [energy, pitch, srmr, snr]
   dvector_dim: 256
 evaluation:
-  num_steps: 8
+  num_steps: 200
   num_workers: 96
   chunk_size: 128
   save_audio: False

@@ -212,7 +212,7 @@ class StepEmbedding(nn.Module):
         return diff_embed
 
 class DiffusionConformer(nn.Module):
-    def __init__(self, in_channels, frame_level_outputs, sequence_level_outputs):
+    def __init__(self, in_channels, frame_level_outputs, sequence_level_outputs, layers=2):
         super().__init__()
         noise_schedule = torch.linspace(
             lco["diffusion"]["beta_0"],
@@ -247,12 +247,12 @@ class DiffusionConformer(nn.Module):
                 2,
                 conv_in=256,
                 conv_filter_size=1024,
-                conv_kernel=(9, 1),
+                conv_kernel=(3, 1),
                 batch_first=True,
                 dropout=0.1,
                 conv_depthwise=True,
             ),
-            num_layers=2,
+            num_layers=layers,
         )
         self.out_layer_frame = nn.Sequential(
             nn.Linear(256, 256),

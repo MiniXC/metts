@@ -7,8 +7,8 @@ from metts.tts.consistency_predictor import ConformerConsistencyPredictorWithDVe
 from metts.dataset.measure import PitchMeasure, EnergyMeasure, SRMRMeasure, SNRMeasure
 import lco
 from torch.utils.data import DataLoader
-from transformers.trainer import TrainingArguments
-from metts.hf.custom_trainer import Trainer
+from transformers.trainer import TrainingArguments, Trainer
+#from metts.hf.custom_trainer import Trainer
 from transformers import HfArgumentParser
 from datasets import load_dataset
 import torch
@@ -60,7 +60,7 @@ def main(index):
     )
 
     consistency_net = ConformerConsistencyPredictorWithDVector.from_pretrained("pretrained_models/consistency")
-    model = FastSpeechWithConsistency(MeTTSConfig(), consistency_net=consistency_net)
+    model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-54000", consistency_net=consistency_net) # (MeTTSConfig(), consistency_net=consistency_net)
 
     trainer = Trainer(
         model,

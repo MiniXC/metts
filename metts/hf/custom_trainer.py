@@ -1717,7 +1717,7 @@ class Trainer:
         self._total_loss_scalar = 0.0
         if hasattr(model, "loss_compounds"):
             tr_loss_compounds = {k: torch.tensor(0.0).to(args.device) for k in model.loss_compounds}
-            self._total_loss_compounds_scalar = {k: 0.0 for k in model.loss_compounds}
+            self._total_loss_scalar_compounds = {k: 0.0 for k in model.loss_compounds}
         else:
             tr_loss_compounds = None
         self._globalstep_last_logged = self.state.global_step
@@ -1941,7 +1941,6 @@ class Trainer:
             for k, v in tr_loss_compounds.items():
                 self._total_loss_scalar_compounds[k] += v.item()
             train_loss_compounds = {f"{k}_train_loss": v / self.state.global_step for k, v in self._total_loss_scalar_compounds.items()}
-
 
         metrics = speed_metrics("train", start_time, num_samples=num_train_samples, num_steps=self.state.max_steps)
         self.store_flos()
