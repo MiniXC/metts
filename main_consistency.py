@@ -58,7 +58,7 @@ def main(index):
     )
 
     #model = ConsistencyPredictor(ConsistencyPredictorConfig())
-    model = ConformerConsistencyPredictorWithDVector.from_pretrained("output/checkpoint-3000") #(ConsistencyPredictorConfig())
+    model = ConformerConsistencyPredictorWithDVector.from_pretrained("pretrained_models/consistency", ignore_mismatched_sizes=True) #(ConsistencyPredictorConfig())
 
     trainer = Trainer(
         model,

@@ -21,10 +21,9 @@ class ConsistencyPredictorConfig(PretrainedConfig):
 class ConformerConsistencyPredictorWithDVector(PreTrainedModel):
     config_class = ConsistencyPredictorConfig
 
-    def __init__(self, config):
+    def __init__(self, config, layers=8):
         super().__init__(config)
         self.measures = lco["consistency"]["measures"]
-        nlayers = lco["consistency"]["nlayers"]
         in_channels = lco["consistency"]["in_channels"]
         filter_size = lco["consistency"]["filter_size"]
         kernel_size = lco["consistency"]["kernel_size"]
@@ -44,26 +43,46 @@ class ConformerConsistencyPredictorWithDVector(PreTrainedModel):
                 2,
                 conv_in=filter_size,
                 conv_filter_size=filter_size,
-                conv_kernel=(3, 1),
+                conv_kernel=(kernel_size, 1),
                 batch_first=True,
-                dropout=0.1,
+                dropout=dropout,
                 conv_depthwise=True,
             ),
-            num_layers=8 # lco["consistency"]["transformer_layers"],
+            num_layers=lco["consistency"]["measure_nlayers"],
         )
 
         self.linear = nn.Sequential(
-            nn.Linear(filter_size, filter_size),
+            nn.Linear(filter_size, 1024),
             nn.ReLU(),
-            nn.Linear(filter_size, num_outputs),
+            nn.Linear(1024, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, num_outputs),
         )
 
         dvector_dim = lco["consistency"]["dvector_dim"]
+        
+        self.dvector_layers = TransformerEncoder(
+            ConformerLayer(
+                filter_size,
+                2,
+                conv_in=filter_size,
+                conv_filter_size=filter_size,
+                conv_kernel=(kernel_size, 1),
+                batch_first=True,
+                dropout=dropout,
+                conv_depthwise=True,
+            ),
+            num_layers=lco["consistency"]["dvector_nlayers"],
+        )
+
         dvector_input_dim = filter_size * 2
-        self.dvector = nn.Sequential(
-            nn.Linear(dvector_input_dim, dvector_dim),
+        
+        self.dvector_linear = nn.Sequential(
+            nn.Linear(dvector_input_dim, 1024),
             nn.ReLU(),
-            nn.Linear(dvector_dim, dvector_dim),
+            nn.Linear(1024, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, dvector_dim),
         )
 
         self.scaler_dict = {
@@ -136,33 +155,32 @@ class ConformerConsistencyPredictorWithDVector(PreTrainedModel):
             measures_loss = 0
             for measure in self.measures:
                 m_loss = nn.MSELoss()(measure_results[measure], measure_true[measure])
-                loss_dict[measure] = m_loss.detach()
+                loss_dict[measure] = m_loss
                 measures_loss += m_loss
             loss = measures_loss / len(self.measures)
             loss = loss + measures_loss / len(self.measures)
         ### d-vector
         # predict d-vector using global average and max pooling as input
+        out_dvec = self.dvector_layers(x)
         dvector_input = torch.cat(
             [
-                torch.mean(out_conv, dim=1),
-                torch.max(out_conv, dim=1)[0],
+                torch.mean(out_dvec, dim=1),
+                torch.max(out_dvec, dim=1)[0],
             ],
             dim=1,
         )
-        dvector_pred = self.dvector(dvector_input)
+        dvector_pred = self.dvector_linear(dvector_input)
         if dvector is not None:
             if self.scalers["dvector"]._n <= 1_000_000:
                 self.scalers["dvector"].partial_fit(dvector)
             dvector_pred = dvector_pred # self.scalers["dvector"].transform(
-            dvector = self.scalers["dvector"].transform(dvector.clone())
-            dvector_loss = nn.MSELoss()(dvector_pred, dvector)
-            loss_dict["dvector"] = dvector_loss.detach()
+            true_dvector = self.scalers["dvector"].transform(dvector)
+            dvector_loss = nn.MSELoss()(dvector_pred, true_dvector)
+            loss_dict["dvector"] = dvector_loss
             loss = loss + dvector_loss
         return {
             "loss": loss,
             "compound_losses": loss_dict,
-            "measures": {m: self.scalers[m].inverse_transform(out[:, i]) for i, m in enumerate(self.measures)},
-            "dvector": self.scalers["dvector"].inverse_transform(dvector_pred),
             "logits": out,
             "logits_dvector": dvector_pred,
         }

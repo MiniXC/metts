@@ -19,13 +19,13 @@ diffusion:
 meta: [duration, mel, audio, energy, pitch, srmr, snr]
 consistency:
   noise_factor: 0.1
-  nlayers: 6
+  measure_nlayers: 4
+  dvector_nlayers: 2
   in_channels: 80
   filter_size: 256
   kernel_size: 3
   dropout: 0.1
   depthwise: True
-  transformer_layers: 4
   measures: [energy, pitch, srmr, snr]
   dvector_dim: 256
 evaluation:
