@@ -186,7 +186,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
             self.mel_diffuser,
         )
 
-        self.diffusion_steps_per_forward = 1
+        self.diffusion_steps_per_forward = lco["diffusion"]["steps_per_forward"]
 
     def _init_weights(self, module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
@@ -199,6 +199,11 @@ class FastSpeechWithConsistency(PreTrainedModel):
         loss_dict = {}
 
         norm_mel = self.con.scalers["mel"].transform(mel)
+
+        if inference:
+            steps_per_forward = 1
+        else:
+            steps_per_forward = self.diffusion_steps_per_forward
 
         if self.duration_scaler._n <= 1_000_000:
             self.duration_scaler.partial_fit(durations)
@@ -223,9 +228,8 @@ class FastSpeechWithConsistency(PreTrainedModel):
 
         norm_durations = norm_durations.to(duration_diffuser_input.dtype)
         duration_diff = norm_durations.unsqueeze(-1) - pred_durations_disc.unsqueeze(-1)
-        print("duration diff", duration_diffuser_input.shape, duration_diff.shape)
         loss_dict["duration_predictor_diff"] = 0.0
-        for _ in range(self.diffusion_steps_per_forward):
+        for _ in range(steps_per_forward):
             true_duration_noise, pred_duration_noise, _, _ = self.durations_diffuser(duration_diffuser_input, duration_diff)
             loss_dict["duration_predictor_diff"] += nn.MSELoss()(true_duration_noise, pred_duration_noise) / self.diffusion_steps_per_forward
 
@@ -236,7 +240,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
                 lco["evaluation"]["num_steps"],
                 batch_size
             )
-            pred_durations = pred_durations_disc.squeeze(-1) #+ pred_duration_diff.squeeze(-1)
+            pred_durations = pred_durations_disc.squeeze(-1) + pred_duration_diff.squeeze(-1)
             pred_durations = self.duration_scaler.inverse_transform(pred_durations)
             pred_durations = torch.round(pred_durations).long()
 
@@ -272,12 +276,11 @@ class FastSpeechWithConsistency(PreTrainedModel):
         measure_diffuser_input = measure_diffuser_input + measure_diffuser_dvec.unsqueeze(1)
         measure_diffuser_input = self.positional_encoding_measures(measure_diffuser_input)
         measures_diff = true_measures.transpose(1, 2) - pred_measures_disc.transpose(1, 2)
-        print("measures diff", measure_diffuser_input.shape, measures_diff.shape)
         dvector_diff = true_dvector - pred_dvector_disc
         loss_dict["measure_predictor_diff"] = 0.0
         loss_dict["dvector_predictor_diff"] = 0.0
 
-        for _ in range(self.diffusion_steps_per_forward):
+        for _ in range(steps_per_forward):
             true_measure_noise, pred_measure_noise, true_dvector_noise, pred_dvector_noise = self.measures_diffuser(measure_diffuser_input, measures_diff, dvector_diff)
             loss_dict["measure_predictor_diff"] += nn.MSELoss()(pred_measure_noise, true_measure_noise) / self.diffusion_steps_per_forward
             loss_dict["dvector_predictor_diff"] += nn.MSELoss()(pred_dvector_noise, true_dvector_noise) / self.diffusion_steps_per_forward
@@ -289,29 +292,8 @@ class FastSpeechWithConsistency(PreTrainedModel):
                 lco["evaluation"]["num_steps"],
                 batch_size
             )
-            pred_measures = pred_measures_disc #+ pred_measures_diff.transpose(1, 2)
-            pred_dvector = pred_dvector_disc #+ pred_dvector_diff
-
-            print("measures diff pred", pred_measures_diff.min(), pred_measures_diff.max(), pred_measures_diff.mean(), pred_measures_diff.std())
-            print("measures diff true", measures_diff.min(), measures_diff.max(), measures_diff.mean(), measures_diff.std())
-
-            print("dvector diff pred", pred_dvector_diff.min(), pred_dvector_diff.max(), pred_dvector_diff.mean(), pred_dvector_diff.std())
-            print("dvector diff true", dvector_diff.min(), dvector_diff.max(), dvector_diff.mean(), dvector_diff.std())
-
-            for i, measure in enumerate(self.con.measures):
-                print()
-                print("Measure", measure)
-                w_diff = wasserstein_distance(pred_measures[:, i].flatten().detach().numpy(), true_measures[:, i].flatten().detach().numpy())
-                w_disc = wasserstein_distance(pred_measures_disc[:, i].flatten().detach().numpy(), true_measures[:, i].flatten().detach().numpy())
-                print(f"Wasserstein distance diff {w_diff:.3f}")
-                print(f"Wasserstein distance disc {w_disc:.3f}")
-                mse_diff = nn.MSELoss()(pred_measures[:, i], true_measures[:, i])
-                mse_disc = nn.MSELoss()(pred_measures_disc[:, i], true_measures[:, i])
-                print(f"MSE diff {mse_diff:.3f}")
-                print(f"MSE disc {mse_disc:.3f}")
-                print()
-
-            #raise
+            pred_measures = pred_measures_disc + pred_measures_diff.transpose(1, 2)
+            pred_dvector = pred_dvector_disc + pred_dvector_diff
 
             ### Add Dvector to Decoder
             dvector_input = self.dvector_to_encoder(pred_dvector)
@@ -361,7 +343,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
 
         mel_diff = norm_mel - pred_mel_disc
         loss_dict["mel_diff"] = 0.0
-        for _ in range(self.diffusion_steps_per_forward):
+        for _ in range(steps_per_forward):
             true_mel_noise, pred_mel_noise, _, _ = self.mel_diffuser(mel_diffuser_input, mel_diff)
             pred_mel_noise = pred_mel_noise * mask
             true_mel_noise = true_mel_noise * mask
@@ -369,18 +351,10 @@ class FastSpeechWithConsistency(PreTrainedModel):
 
         ### Mel Sampling
         if True:
-            print("mel diff input", mel_diffuser_input.shape, mel_diff.shape)
             pred_mel_diff, _ = self.mel_sampler(mel_diffuser_input, lco["evaluation"]["num_steps"], batch_size)
-            print("mel diff pred", pred_mel_diff.min(), pred_mel_diff.max(), pred_mel_diff.mean(), pred_mel_diff.std())
-            print("mel diff true", mel_diff.min(), mel_diff.max(), mel_diff.mean(), mel_diff.std())
-            print(pred_mel_diff.shape, pred_mel_disc.shape)
-            pred_mel = pred_mel_disc #+ pred_mel_diff
-            print("mel wasserstein diff", wasserstein_distance(pred_mel.flatten().detach().numpy(), norm_mel.flatten().detach().numpy()))
-            print("mel wasserstein disc", wasserstein_distance(pred_mel_disc.flatten().detach().numpy(), norm_mel.flatten().detach().numpy()))
+            pred_mel = pred_mel_disc + pred_mel_diff
             mel_mse_diff = nn.MSELoss()(pred_mel, norm_mel)
             mel_mse_disc = nn.MSELoss()(pred_mel_disc, norm_mel)
-            print("mel mse diff", mel_mse_diff)
-            print("mel mse disc", mel_mse_disc)
         else:
             pred_mel = pred_mel_disc
 

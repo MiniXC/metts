@@ -12,6 +12,7 @@ conformer:
 measures:
   silence_mask: False
 diffusion:
+  steps_per_forward: 10
   num_steps: 1000
   beta_0: 0.000001
   beta_T: 0.01
