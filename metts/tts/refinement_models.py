@@ -296,6 +296,7 @@ class DiffusionConformer(nn.Module):
         return frame_out, sequence_out
 
     def forward(self, c, x_frame, x_sequence=None):
+        c = c.detach()
         batch_size = x_frame.shape[0]
         step = torch.randint(low=0, high=self.diff_params["T"], size=(batch_size,1,1))
         

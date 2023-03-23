@@ -16,6 +16,9 @@ from .length_regulator import LengthRegulator
 from .refinement_models import DiffusionConformer, DiffusionSampler
 from .scaler import GaussianMinMaxScaler
 
+# wasserstein distance
+from scipy.stats import wasserstein_distance
+
 num_cpus = multiprocessing.cpu_count()
 
 class MeTTSConfig(PretrainedConfig):
@@ -220,6 +223,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
 
         norm_durations = norm_durations.to(duration_diffuser_input.dtype)
         duration_diff = norm_durations.unsqueeze(-1) - pred_durations_disc.unsqueeze(-1)
+        print("duration diff", duration_diffuser_input.shape, duration_diff.shape)
         loss_dict["duration_predictor_diff"] = 0.0
         for _ in range(self.diffusion_steps_per_forward):
             true_duration_noise, pred_duration_noise, _, _ = self.durations_diffuser(duration_diffuser_input, duration_diff)
@@ -227,14 +231,15 @@ class FastSpeechWithConsistency(PreTrainedModel):
 
         ### Length Regulator
         if inference:
-            duration_diff, _ = self.durations_sampler(
+            pred_duration_diff, _ = self.durations_sampler(
                 duration_diffuser_input,
                 lco["evaluation"]["num_steps"],
                 batch_size
             )
-            pred_durations = pred_durations_disc.squeeze(-1) + duration_diff.squeeze(-1)
+            pred_durations = pred_durations_disc.squeeze(-1) #+ pred_duration_diff.squeeze(-1)
             pred_durations = self.duration_scaler.inverse_transform(pred_durations)
             pred_durations = torch.round(pred_durations).long()
+
             if (pred_durations < 0).any():
                 print("negative duration, setting to 0")
                 pred_durations[pred_durations < 0] = 0
@@ -254,22 +259,24 @@ class FastSpeechWithConsistency(PreTrainedModel):
         pred_measures = self.measures_linear(pred_measures)
         pred_measures = pred_measures.transpose(1, 2)
         # max pool and avg pool for dvector        
-        pred_dvector = torch.cat([x.mean(dim=1), x.max(dim=1)[0]], dim=-1)
-        pred_dvector = self.measures_dvector(pred_dvector)
+        pred_dvector_disc = torch.cat([x.mean(dim=1), x.max(dim=1)[0]], dim=-1)
+        pred_dvector_disc = self.measures_dvector(pred_dvector_disc)
         #### Measure Loss
-        pred_measures = pred_measures * mask.transpose(1, 2)
-        true_measures = true_measures * mask.transpose(1, 2)
-        loss_dict["measure_predictor"] = nn.MSELoss()(pred_measures, true_measures)
-        loss_dict["dvector_predictor"] = nn.MSELoss()(pred_dvector, true_dvector)
+        pred_measures_disc = pred_measures * mask.transpose(1, 2)
+        true_measures_disc = true_measures * mask.transpose(1, 2)
+        loss_dict["measure_predictor"] = nn.MSELoss()(pred_measures_disc, true_measures)
+        loss_dict["dvector_predictor"] = nn.MSELoss()(pred_dvector_disc, true_dvector)
         ### Measure Diffusion
-        measure_diffuser_input = x + self.measures_in(pred_measures.transpose(1, 2))
-        measure_diffuser_dvec = self.measures_dvector_in(pred_dvector)
+        measure_diffuser_input = x + self.measures_in(pred_measures_disc.transpose(1, 2))
+        measure_diffuser_dvec = self.measures_dvector_in(pred_dvector_disc)
         measure_diffuser_input = measure_diffuser_input + measure_diffuser_dvec.unsqueeze(1)
         measure_diffuser_input = self.positional_encoding_measures(measure_diffuser_input)
-        measures_diff = true_measures.transpose(1, 2) - pred_measures.transpose(1, 2)
-        dvector_diff = true_dvector - pred_dvector
+        measures_diff = true_measures.transpose(1, 2) - pred_measures_disc.transpose(1, 2)
+        print("measures diff", measure_diffuser_input.shape, measures_diff.shape)
+        dvector_diff = true_dvector - pred_dvector_disc
         loss_dict["measure_predictor_diff"] = 0.0
         loss_dict["dvector_predictor_diff"] = 0.0
+
         for _ in range(self.diffusion_steps_per_forward):
             true_measure_noise, pred_measure_noise, true_dvector_noise, pred_dvector_noise = self.measures_diffuser(measure_diffuser_input, measures_diff, dvector_diff)
             loss_dict["measure_predictor_diff"] += nn.MSELoss()(pred_measure_noise, true_measure_noise) / self.diffusion_steps_per_forward
@@ -282,8 +289,30 @@ class FastSpeechWithConsistency(PreTrainedModel):
                 lco["evaluation"]["num_steps"],
                 batch_size
             )
-            pred_measures = pred_measures + pred_measures_diff.transpose(1, 2)
-            pred_dvector = pred_dvector + pred_dvector_diff
+            pred_measures = pred_measures_disc #+ pred_measures_diff.transpose(1, 2)
+            pred_dvector = pred_dvector_disc #+ pred_dvector_diff
+
+            print("measures diff pred", pred_measures_diff.min(), pred_measures_diff.max(), pred_measures_diff.mean(), pred_measures_diff.std())
+            print("measures diff true", measures_diff.min(), measures_diff.max(), measures_diff.mean(), measures_diff.std())
+
+            print("dvector diff pred", pred_dvector_diff.min(), pred_dvector_diff.max(), pred_dvector_diff.mean(), pred_dvector_diff.std())
+            print("dvector diff true", dvector_diff.min(), dvector_diff.max(), dvector_diff.mean(), dvector_diff.std())
+
+            for i, measure in enumerate(self.con.measures):
+                print()
+                print("Measure", measure)
+                w_diff = wasserstein_distance(pred_measures[:, i].flatten().detach().numpy(), true_measures[:, i].flatten().detach().numpy())
+                w_disc = wasserstein_distance(pred_measures_disc[:, i].flatten().detach().numpy(), true_measures[:, i].flatten().detach().numpy())
+                print(f"Wasserstein distance diff {w_diff:.3f}")
+                print(f"Wasserstein distance disc {w_disc:.3f}")
+                mse_diff = nn.MSELoss()(pred_measures[:, i], true_measures[:, i])
+                mse_disc = nn.MSELoss()(pred_measures_disc[:, i], true_measures[:, i])
+                print(f"MSE diff {mse_diff:.3f}")
+                print(f"MSE disc {mse_disc:.3f}")
+                print()
+
+            #raise
+
             ### Add Dvector to Decoder
             dvector_input = self.dvector_to_encoder(pred_dvector)
             x = x + dvector_input.unsqueeze(1)
@@ -307,26 +336,22 @@ class FastSpeechWithConsistency(PreTrainedModel):
         ### Decoder
         x = self.positional_encoding(x)
         x, hidden = self.decoder(x)
-        x = self.final(x)
+        pred_mel_disc = self.final(x)
 
         ### Consistency Loss
-        synthetic_result = self.con(x, inference=True)
+        synthetic_result = self.con(pred_mel_disc, inference=True)
         cons_measures = synthetic_result["logits"]
         cons_dvector = synthetic_result["logits_dvector"]
         loss_dict["measure_consistency"] = nn.MSELoss()(cons_measures, true_measures)
         loss_dict["dvector_consistency"] = nn.MSELoss()(cons_dvector, true_dvector)
 
         ### Mel Loss
-        x = x * mask
+        pred_mel_disc = pred_mel_disc * mask
         norm_mel = norm_mel * mask
-        norm_mel = norm_mel.transpose(1, 2)
-        x = x.transpose(1, 2)
-        loss_dict["mel"] = nn.MSELoss()(x, norm_mel)
-        norm_mel = norm_mel.transpose(1, 2)
-        x = x.transpose(1, 2)
+        loss_dict["mel"] = nn.MSELoss()(pred_mel_disc, norm_mel)
 
         ### Mel Diffusion
-        mel_diffuser_input = self.mel_in(x) + hidden
+        mel_diffuser_input = self.mel_in(pred_mel_disc) + hidden
         if inference:
             mel_diffuser_dvec = self.mel_dvector_in(pred_dvector)
         else:
@@ -334,7 +359,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
         mel_diffuser_input = mel_diffuser_input + mel_diffuser_dvec.unsqueeze(1)
         mel_diffuser_input = self.positional_encoding_mel(mel_diffuser_input)
 
-        mel_diff = norm_mel - x
+        mel_diff = norm_mel - pred_mel_disc
         loss_dict["mel_diff"] = 0.0
         for _ in range(self.diffusion_steps_per_forward):
             true_mel_noise, pred_mel_noise, _, _ = self.mel_diffuser(mel_diffuser_input, mel_diff)
@@ -343,21 +368,37 @@ class FastSpeechWithConsistency(PreTrainedModel):
             loss_dict["mel_diff"] += nn.MSELoss()(pred_mel_noise, true_mel_noise) / self.diffusion_steps_per_forward
 
         ### Mel Sampling
-        if inference:
-            mel_add, _ = self.mel_sampler(mel_diffuser_input, lco["evaluation"]["num_steps"], batch_size)
-            x = x + mel_add
+        if True:
+            print("mel diff input", mel_diffuser_input.shape, mel_diff.shape)
+            pred_mel_diff, _ = self.mel_sampler(mel_diffuser_input, lco["evaluation"]["num_steps"], batch_size)
+            print("mel diff pred", pred_mel_diff.min(), pred_mel_diff.max(), pred_mel_diff.mean(), pred_mel_diff.std())
+            print("mel diff true", mel_diff.min(), mel_diff.max(), mel_diff.mean(), mel_diff.std())
+            print(pred_mel_diff.shape, pred_mel_disc.shape)
+            pred_mel = pred_mel_disc #+ pred_mel_diff
+            print("mel wasserstein diff", wasserstein_distance(pred_mel.flatten().detach().numpy(), norm_mel.flatten().detach().numpy()))
+            print("mel wasserstein disc", wasserstein_distance(pred_mel_disc.flatten().detach().numpy(), norm_mel.flatten().detach().numpy()))
+            mel_mse_diff = nn.MSELoss()(pred_mel, norm_mel)
+            mel_mse_disc = nn.MSELoss()(pred_mel_disc, norm_mel)
+            print("mel mse diff", mel_mse_diff)
+            print("mel mse disc", mel_mse_disc)
+        else:
+            pred_mel = pred_mel_disc
+
+        results = {
+            "compound_losses": loss_dict,
+            "mask": mask,
+        }
 
         # denormalize mel
-        x = self.con.scalers["mel"].inverse_transform(x.detach())
-        x = x * mask
+        if inference:
+            x = self.con.scalers["mel"].inverse_transform(pred_mel)
+            x = x * mask
+            results["mel"] = x
 
         mask_scale = mask.sum() / (mask.shape[0] * mask.shape[1])
         
         loss = sum(loss_dict.values()) / len(loss_dict) * mask_scale
 
-        return {
-            "loss": loss,
-            "mel": x,
-            "compound_losses": loss_dict,
-            "mask": mask,
-        }
+        results["loss"] = loss
+
+        return results

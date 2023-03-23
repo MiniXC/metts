@@ -38,18 +38,19 @@ collator = FastSpeechWithConsistencyCollator(
         phone2idx=phone2idx,
         measure_stats=measure_stats,
         keys="all",
+        overwrite_max_length=True
     )
 
 dl = DataLoader(
     eval_data,
-    batch_size=128,
+    batch_size=1,
     collate_fn=collator.collate_fn,
-    shuffle=False,
+    shuffle=True,
     num_workers=96,
 )
 
 consistency_net = ConformerConsistencyPredictorWithDVector.from_pretrained("pretrained_models/consistency")
-model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-54000", consistency_net=consistency_net)
+model = FastSpeechWithConsistency.from_pretrained("models/tts_partial", consistency_net=consistency_net)
 
 # eval
 model.eval()
@@ -64,10 +65,18 @@ for i, item in tqdm(enumerate(dl), total=len(dl)):
     # print(max_phone_length)
 
     mel = item["mel"]
-    # noralize mel
-    # mel = model.con.scalers["mel"].transform(mel)
 
-    result_inf = model(
+    # result_inf = model(
+    #     item["phones"],
+    #     item["phone_durations"],
+    #     item["durations"],
+    #     item["mel"],
+    #     item["val_ind"],
+    #     item["speaker"],
+    #     inference=True,
+    # )
+
+    result_tf = model(
         item["phones"],
         item["phone_durations"],
         item["durations"],
@@ -77,28 +86,18 @@ for i, item in tqdm(enumerate(dl), total=len(dl)):
         inference=True,
     )
 
-    result_tf = model(
-        item["phones"],
-        item["phone_durations"],
-        item["durations"],
-        item["mel"],
-        item["val_ind"],
-        item["speaker"],
-        force_tf=True,
-    )
+    #result_inf = result_tf
 
-    # mel_shape (batch, mel_len, mel_dim)
-    # mask such that only sections with 0s are masked
-    mask = result_inf["mask"].squeeze(-1)
-    synth_mel = result_inf["mel"][0][mask[0]]
+    mask = result_tf["mask"].squeeze(-1)
+    synth_mel = result_tf["mel"][0][mask[0]][:-1]
     audio = synth(synth_mel)
     if len(audio.shape) == 1:
         audio = torch.tensor(audio).unsqueeze(0)
     else:
         audio = torch.tensor(audio)
-    torchaudio.save("test.wav", audio, 22050)
+    torchaudio.save(f"test_{i}.wav", audio, 22050)
     
-    # plot ground truth vs predicted (tf) and predicted (inf)
+    # # plot ground truth vs predicted (tf) and predicted (inf)
     mel_min, mel_max = torch.min(mel), torch.max(mel)
     plt.figure(figsize=(20, 10))
     plt.subplot(3, 1, 1)
@@ -107,20 +106,23 @@ for i, item in tqdm(enumerate(dl), total=len(dl)):
     plt.subplot(3, 1, 2)
     plt.imshow(result_tf["mel"][0].detach().numpy().T, aspect="auto", origin="lower", vmin=mel_min, vmax=mel_max)
     plt.title("Predicted (TF)")
-    plt.subplot(3, 1, 3)
-    plt.imshow(result_inf["mel"][0].detach().numpy().T, aspect="auto", origin="lower", vmin=mel_min, vmax=mel_max)
-    plt.title("Predicted (Inf)")
+    # plt.subplot(3, 1, 3)
+    # plt.imshow(result_inf["mel"][0].detach().numpy().T, aspect="auto", origin="lower", vmin=mel_min, vmax=mel_max)
+    # plt.title("Predicted (Inf)")
 
-    # save to examples
-    plt.savefig(f"examples/{i}_mel_tts.png")
+    # # save to examples
+    plt.savefig(f"mel_tts.png")
 
-    print("inference mode losses")
-    for loss in result_inf["compound_losses"]:
-        print(loss, result_inf["compound_losses"][loss].item())
+    # print("inference mode losses")
+    # for loss in result_inf["compound_losses"]:
+    #     loss_val = result_inf["compound_losses"][loss].item()
+    #     # print loss with 4 decimal places and justify loss name the numbers line up
+    #     print(f"{loss.ljust(25)}: {loss_val:.4f}")
 
-    print("force tf mode losses")
-    for loss in result_tf["compound_losses"]:
-        print(loss, result_tf["compound_losses"][loss].item())
+    # print("force tf mode losses")
+    # for loss in result_tf["compound_losses"]:
+    #     loss_val = result_tf["compound_losses"][loss].item()
+    #     print(f"{loss.ljust(25)}: {loss_val:.4f}")
 
-    if i == 4:
+    if i == 10:
         break
