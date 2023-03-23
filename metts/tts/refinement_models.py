@@ -250,7 +250,7 @@ class DiffusionConformer(nn.Module):
                 conv_kernel=(3, 1),
                 batch_first=True,
                 dropout=0.1,
-                conv_depthwise=True,
+                conv_depthwise=lco["diffusion"]["depthwise"],
             ),
             num_layers=layers,
         )
