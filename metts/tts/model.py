@@ -89,7 +89,6 @@ class FastSpeechWithConsistency(PreTrainedModel):
             nn.ReLU(),
             nn.Linear(256, 1),
         )
-        self.positional_encoding_durations = PositionalEncoding(256)
         self.durations_in = nn.Sequential(
             nn.Linear(1, 256),
             nn.ReLU(),
@@ -132,7 +131,6 @@ class FastSpeechWithConsistency(PreTrainedModel):
             nn.Linear(256, 256),
         )
         self.measures_dvector_in = nn.Linear(256, 256)
-        self.positional_encoding_measures = PositionalEncoding(256)
         self.measures_in = nn.Sequential(
             nn.Linear(4, 256),
             nn.ReLU(),
@@ -174,7 +172,6 @@ class FastSpeechWithConsistency(PreTrainedModel):
             nn.Linear(256, 80),
         )
         self.mel_dvector_in = nn.Linear(256, 256)
-        self.positional_encoding_mel = PositionalEncoding(256)
         self.mel_in = nn.Linear(80, 256)
         self.mel_diffuser = DiffusionConformer(
             in_channels=256, # hidden dim + predicted mel
@@ -224,7 +221,6 @@ class FastSpeechWithConsistency(PreTrainedModel):
 
         #### Duration Diffusion
         duration_diffuser_input = x + self.durations_in(pred_durations_disc.unsqueeze(-1))
-        duration_diffuser_input = self.positional_encoding_durations(duration_diffuser_input)
 
         norm_durations = norm_durations.to(duration_diffuser_input.dtype)
         duration_diff = norm_durations.unsqueeze(-1) - pred_durations_disc.unsqueeze(-1)
@@ -274,7 +270,6 @@ class FastSpeechWithConsistency(PreTrainedModel):
         measure_diffuser_input = x + self.measures_in(pred_measures_disc.transpose(1, 2))
         measure_diffuser_dvec = self.measures_dvector_in(pred_dvector_disc)
         measure_diffuser_input = measure_diffuser_input + measure_diffuser_dvec.unsqueeze(1)
-        measure_diffuser_input = self.positional_encoding_measures(measure_diffuser_input)
         measures_diff = true_measures.transpose(1, 2) - pred_measures_disc.transpose(1, 2)
         dvector_diff = true_dvector - pred_dvector_disc
         loss_dict["measure_predictor_diff"] = 0.0
@@ -293,7 +288,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
                 batch_size
             )
             pred_measures = pred_measures_disc + pred_measures_diff.transpose(1, 2)
-            pred_dvector = pred_dvector_disc + pred_dvector_diff
+            pred_dvector = pred_dvector_disc #+ pred_dvector_diff
 
             ### Add Dvector to Decoder
             dvector_input = self.dvector_to_encoder(pred_dvector)
@@ -339,7 +334,6 @@ class FastSpeechWithConsistency(PreTrainedModel):
         else:
             mel_diffuser_dvec = self.mel_dvector_in(true_dvector)
         mel_diffuser_input = mel_diffuser_input + mel_diffuser_dvec.unsqueeze(1)
-        mel_diffuser_input = self.positional_encoding_mel(mel_diffuser_input)
 
         mel_diff = norm_mel - pred_mel_disc
         loss_dict["mel_diff"] = 0.0
@@ -350,11 +344,10 @@ class FastSpeechWithConsistency(PreTrainedModel):
             loss_dict["mel_diff"] += nn.MSELoss()(pred_mel_noise, true_mel_noise) / self.diffusion_steps_per_forward
 
         ### Mel Sampling
-        if True:
+        if inference:
             pred_mel_diff, _ = self.mel_sampler(mel_diffuser_input, lco["evaluation"]["num_steps"], batch_size)
-            pred_mel = pred_mel_disc + pred_mel_diff
-            mel_mse_diff = nn.MSELoss()(pred_mel, norm_mel)
-            mel_mse_disc = nn.MSELoss()(pred_mel_disc, norm_mel)
+            #pred_mel = pred_mel_disc + pred_mel_diff
+            pred_mel = pred_mel_diff
         else:
             pred_mel = pred_mel_disc
 

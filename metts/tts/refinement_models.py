@@ -261,6 +261,25 @@ class DiffusionConformer(nn.Module):
         )
 
         if self.sequence_level_outputs > 0:
+            self.frame_in = nn.Sequential(
+                nn.Linear(sequence_level_outputs, 256),
+                nn.ReLU(),
+                nn.Linear(256, 256),
+            )
+            self.sequence_in = nn.Linear(256, 256)
+            self.sequence_transformer = TransformerEncoder(
+                ConformerLayer(
+                    256,
+                    2,
+                    conv_in=256,
+                    conv_filter_size=1024,
+                    conv_kernel=(3, 1),
+                    batch_first=True,
+                    dropout=0.1,
+                    conv_depthwise=lco["diffusion"]["depthwise"],
+                ),
+                num_layers=layers,
+            )
             self.out_layer_sequence = nn.Sequential(
                 nn.Linear(512, 256),
                 nn.ReLU(),
@@ -279,16 +298,22 @@ class DiffusionConformer(nn.Module):
         out = self.conformer(x)
         frame_out = self.out_layer_frame(x)
 
-        # use max + avg pooling to get sequence level conditional embedding
-        sequence_out = torch.cat(
-            (
-                torch.max(out, 1)[0],
-                torch.mean(out, 1),
-            ),
-            1
-        )
-
         if self.sequence_level_outputs > 0:
+            sequence_in = (
+                self.sequence_in(frame_out) +
+                step_embed.unsqueeze(1) +
+                c
+            )
+            self.positional_encoding(sequence_in)
+            out = self.sequence_transformer(sequence_in)
+            # use max + avg pooling to get sequence level conditional embedding
+            sequence_out = torch.cat(
+                (
+                    torch.max(out, 1)[0],
+                    torch.mean(out, 1),
+                ),
+                1
+            )
             sequence_out = self.out_layer_sequence(sequence_out)
         else:
             sequence_out = None
@@ -297,6 +322,9 @@ class DiffusionConformer(nn.Module):
 
     def forward(self, c, x_frame, x_sequence=None):
         c = c.detach()
+        x_frame = x_frame.detach()
+        if x_sequence is not None:
+            x_sequence = x_sequence.detach()
         batch_size = x_frame.shape[0]
         step = torch.randint(low=0, high=self.diff_params["T"], size=(batch_size,1,1))
         

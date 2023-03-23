@@ -60,7 +60,7 @@ def main(index):
     )
 
     consistency_net = ConformerConsistencyPredictorWithDVector.from_pretrained("pretrained_models/consistency")
-    model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-30000", consistency_net=consistency_net, ignore_mismatched_sizes=True) # (MeTTSConfig(), consistency_net=consistency_net)
+    model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-2000", consistency_net=consistency_net, ignore_mismatched_sizes=True) # (MeTTSConfig(), consistency_net=consistency_net)
 
     trainer = Trainer(
         model,
