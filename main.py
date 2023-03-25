@@ -13,9 +13,11 @@ from transformers import HfArgumentParser
 from datasets import load_dataset
 import torch
 
+
 def compute_metrics():
     model = trainer._wrap_model(trainer.model, training=False)
     device = model.device
+    model = model.eval()
     prc_index = trainer.args.process_index
     if prc_index == 0:
         eval_data = dev_global
@@ -41,12 +43,14 @@ def compute_metrics():
 
         return log_dict
 
+    return {}
+
 def main(index):
     global trainer, dev_global, collator
     training_args = HfArgumentParser(TrainingArguments).parse_json_file("config/trainer.json")[0]
 
     train = load_dataset("metts/dataset/dataset.py", "libritts", split="train")
-    dev = load_dataset("metts/dataset/dataset.py", "libritts", split="dev[:1%]")
+    dev = load_dataset("metts/dataset/dataset.py", "libritts", split="dev[:10%]")
     dev_global = load_dataset("metts/dataset/dataset.py", "libritts", split="dev[:50%]")
     speaker2idx = json.load(open("data/speaker2idx.json"))
     phone2idx = json.load(open("data/phone2idx.json"))
@@ -60,7 +64,7 @@ def main(index):
     )
 
     consistency_net = ConformerConsistencyPredictorWithDVector.from_pretrained("pretrained_models/consistency")
-    model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-2000", consistency_net=consistency_net, ignore_mismatched_sizes=True) # (MeTTSConfig(), consistency_net=consistency_net)
+    model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-9000", consistency_net=consistency_net, ignore_mismatched_sizes=True) # (MeTTSConfig(), consistency_net=consistency_net)
 
     trainer = Trainer(
         model,

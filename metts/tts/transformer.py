@@ -38,7 +38,7 @@ class TransformerEncoder(nn.Module):
         self.norm = norm
         self.return_additional_layer = return_additional_layer
 
-    def forward(self, src, mask=None, src_key_padding_mask=None):
+    def forward(self, src, mask=None, src_key_padding_mask=None, condition=None):
             if src_key_padding_mask is not None:
                 _skpm_dtype = src_key_padding_mask.dtype
                 if _skpm_dtype != torch.bool and not torch.is_floating_point(src_key_padding_mask):
@@ -50,6 +50,8 @@ class TransformerEncoder(nn.Module):
             output_for_return = None
 
             for i, mod in enumerate(self.layers):
+                if condition is not None:
+                    output = output + condition
                 output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask_for_layers)
                 if self.return_additional_layer is not None and i == self.return_additional_layer:
                     output_for_return = output

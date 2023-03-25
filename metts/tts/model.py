@@ -49,6 +49,8 @@ class FastSpeechWithConsistency(PreTrainedModel):
         for param in self.con.parameters():
             param.requires_grad = False
 
+        self.diffusion_only = lco["training"]["diffusion_only"]
+
         self.positional_encoding = PositionalEncoding(256)
 
         # layers
@@ -125,6 +127,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
             nn.ReLU(),
             nn.Linear(256, 4),
         ) # 4 measures
+
         self.measures_dvector = nn.Sequential(
             nn.Linear(512, 256),
             nn.ReLU(),
@@ -173,6 +176,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
         )
         self.mel_dvector_in = nn.Linear(256, 256)
         self.mel_in = nn.Linear(80, 256)
+        self.mel_diffuser_hidden_in = nn.Linear(256, 256)
         self.mel_diffuser = DiffusionConformer(
             in_channels=256, # hidden dim + predicted mel
             frame_level_outputs=80,
@@ -217,13 +221,14 @@ class FastSpeechWithConsistency(PreTrainedModel):
         ### Duration Prediction
         pred_durations_disc = self.duration_transformer(x)
         pred_durations_disc = self.durations_linear(pred_durations_disc).squeeze(-1)
-        loss_dict["duration_predictor"] = nn.MSELoss()(pred_durations_disc, norm_durations)
+        if not self.diffusion_only:
+            loss_dict["duration_predictor"] = nn.MSELoss()(pred_durations_disc, norm_durations)
 
         #### Duration Diffusion
         duration_diffuser_input = x + self.durations_in(pred_durations_disc.unsqueeze(-1))
 
         norm_durations = norm_durations.to(duration_diffuser_input.dtype)
-        duration_diff = norm_durations.unsqueeze(-1) - pred_durations_disc.unsqueeze(-1)
+        duration_diff = norm_durations.unsqueeze(-1)
         loss_dict["duration_predictor_diff"] = 0.0
         for _ in range(steps_per_forward):
             true_duration_noise, pred_duration_noise, _, _ = self.durations_diffuser(duration_diffuser_input, duration_diff)
@@ -244,6 +249,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
                 print("negative duration, setting to 0")
                 pred_durations[pred_durations < 0] = 0
             pred_durations[(phones == 0) | (phones == 46)] = 0
+
             x, mask = self.lr(x, pred_durations)
         else:
             x, mask = self.lr(x, phone_durations, val_ind)
@@ -264,14 +270,15 @@ class FastSpeechWithConsistency(PreTrainedModel):
         #### Measure Loss
         pred_measures_disc = pred_measures * mask.transpose(1, 2)
         true_measures_disc = true_measures * mask.transpose(1, 2)
-        loss_dict["measure_predictor"] = nn.MSELoss()(pred_measures_disc, true_measures)
-        loss_dict["dvector_predictor"] = nn.MSELoss()(pred_dvector_disc, true_dvector)
+        if not self.diffusion_only:
+            loss_dict["measure_predictor"] = nn.MSELoss()(pred_measures_disc, true_measures)
+            loss_dict["dvector_predictor"] = nn.MSELoss()(pred_dvector_disc, true_dvector)
         ### Measure Diffusion
         measure_diffuser_input = x + self.measures_in(pred_measures_disc.transpose(1, 2))
         measure_diffuser_dvec = self.measures_dvector_in(pred_dvector_disc)
         measure_diffuser_input = measure_diffuser_input + measure_diffuser_dvec.unsqueeze(1)
-        measures_diff = true_measures.transpose(1, 2) - pred_measures_disc.transpose(1, 2)
-        dvector_diff = true_dvector - pred_dvector_disc
+        measures_diff = true_measures.transpose(1, 2) * mask
+        dvector_diff = true_dvector
         loss_dict["measure_predictor_diff"] = 0.0
         loss_dict["dvector_predictor_diff"] = 0.0
 
@@ -279,6 +286,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
             true_measure_noise, pred_measure_noise, true_dvector_noise, pred_dvector_noise = self.measures_diffuser(measure_diffuser_input, measures_diff, dvector_diff)
             loss_dict["measure_predictor_diff"] += nn.MSELoss()(pred_measure_noise, true_measure_noise) / self.diffusion_steps_per_forward
             loss_dict["dvector_predictor_diff"] += nn.MSELoss()(pred_dvector_noise, true_dvector_noise) / self.diffusion_steps_per_forward
+            loss_dict["dvector_predictor_diff"] *= 0.1
 
         if inference:
             ### Measure & Dvector Sampling
@@ -287,8 +295,8 @@ class FastSpeechWithConsistency(PreTrainedModel):
                 lco["evaluation"]["num_steps"],
                 batch_size
             )
-            pred_measures = pred_measures_disc + pred_measures_diff.transpose(1, 2)
-            pred_dvector = pred_dvector_disc #+ pred_dvector_diff
+            pred_measures_diff = pred_measures_diff.transpose(1, 2) * mask.transpose(1, 2)     
+            pred_dvector = true_dvector
 
             ### Add Dvector to Decoder
             dvector_input = self.dvector_to_encoder(pred_dvector)
@@ -319,23 +327,25 @@ class FastSpeechWithConsistency(PreTrainedModel):
         synthetic_result = self.con(pred_mel_disc, inference=True)
         cons_measures = synthetic_result["logits"]
         cons_dvector = synthetic_result["logits_dvector"]
-        loss_dict["measure_consistency"] = nn.MSELoss()(cons_measures, true_measures)
-        loss_dict["dvector_consistency"] = nn.MSELoss()(cons_dvector, true_dvector)
+        if not self.diffusion_only:
+            loss_dict["measure_consistency"] = nn.MSELoss()(cons_measures, true_measures)
+            loss_dict["dvector_consistency"] = nn.MSELoss()(cons_dvector, true_dvector)
 
         ### Mel Loss
         pred_mel_disc = pred_mel_disc * mask
         norm_mel = norm_mel * mask
-        loss_dict["mel"] = nn.MSELoss()(pred_mel_disc, norm_mel)
+        if not self.diffusion_only:
+            loss_dict["mel"] = nn.MSELoss()(pred_mel_disc, norm_mel)
 
         ### Mel Diffusion
-        mel_diffuser_input = self.mel_in(pred_mel_disc) + hidden
+        mel_diffuser_input = self.mel_in(pred_mel_disc) + self.mel_diffuser_hidden_in(hidden)
         if inference:
             mel_diffuser_dvec = self.mel_dvector_in(pred_dvector)
         else:
             mel_diffuser_dvec = self.mel_dvector_in(true_dvector)
         mel_diffuser_input = mel_diffuser_input + mel_diffuser_dvec.unsqueeze(1)
 
-        mel_diff = norm_mel - pred_mel_disc
+        mel_diff = norm_mel # - pred_mel_disc
         loss_dict["mel_diff"] = 0.0
         for _ in range(steps_per_forward):
             true_mel_noise, pred_mel_noise, _, _ = self.mel_diffuser(mel_diffuser_input, mel_diff)
@@ -357,10 +367,10 @@ class FastSpeechWithConsistency(PreTrainedModel):
         }
 
         # denormalize mel
-        if inference:
-            x = self.con.scalers["mel"].inverse_transform(pred_mel)
-            x = x * mask
-            results["mel"] = x
+        #if inference:
+        x = self.con.scalers["mel"].inverse_transform(pred_mel)
+        x = x * mask
+        results["mel"] = x
 
         mask_scale = mask.sum() / (mask.shape[0] * mask.shape[1])
         

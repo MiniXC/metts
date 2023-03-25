@@ -11,3 +11,5 @@ wandb
 examples
 models
 *.zip
+*.wav
+*.png

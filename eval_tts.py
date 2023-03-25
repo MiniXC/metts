@@ -45,12 +45,12 @@ dl = DataLoader(
     eval_data,
     batch_size=1,
     collate_fn=collator.collate_fn,
-    shuffle=True,
-    num_workers=96,
+    shuffle=False,
+    num_workers=12,
 )
 
 consistency_net = ConformerConsistencyPredictorWithDVector.from_pretrained("pretrained_models/consistency")
-model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-2000", consistency_net=consistency_net)
+model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-47000", consistency_net=consistency_net)
 
 # eval
 model.eval()
@@ -83,10 +83,9 @@ for i, item in tqdm(enumerate(dl), total=len(dl)):
         item["mel"],
         item["val_ind"],
         item["speaker"],
-        inference=True,
     )
 
-    #result_inf = result_tf
+    result_inf = result_tf
 
     mask = result_tf["mask"].squeeze(-1)
     synth_mel = result_tf["mel"][0][mask[0]][:-1]
@@ -106,9 +105,9 @@ for i, item in tqdm(enumerate(dl), total=len(dl)):
     plt.subplot(3, 1, 2)
     plt.imshow(result_tf["mel"][0].detach().numpy().T, aspect="auto", origin="lower", vmin=mel_min, vmax=mel_max)
     plt.title("Predicted (TF)")
-    # plt.subplot(3, 1, 3)
-    # plt.imshow(result_inf["mel"][0].detach().numpy().T, aspect="auto", origin="lower", vmin=mel_min, vmax=mel_max)
-    # plt.title("Predicted (Inf)")
+    plt.subplot(3, 1, 3)
+    plt.imshow(result_inf["mel"][0].detach().numpy().T, aspect="auto", origin="lower", vmin=mel_min, vmax=mel_max)
+    plt.title("Predicted (Inf)")
 
     # # save to examples
     plt.savefig(f"mel_tts.png")
@@ -124,5 +123,5 @@ for i, item in tqdm(enumerate(dl), total=len(dl)):
     #     loss_val = result_tf["compound_losses"][loss].item()
     #     print(f"{loss.ljust(25)}: {loss_val:.4f}")
 
-    if i == 10:
+    if i == 0:
         break
