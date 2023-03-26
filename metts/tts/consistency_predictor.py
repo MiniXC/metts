@@ -173,7 +173,6 @@ class ConformerConsistencyPredictorWithDVector(PreTrainedModel):
         if dvector is not None:
             if self.scalers["dvector"]._n <= 1_000_000:
                 self.scalers["dvector"].partial_fit(dvector)
-            dvector_pred = dvector_pred # self.scalers["dvector"].transform(
             true_dvector = self.scalers["dvector"].transform(dvector)
             dvector_loss = nn.MSELoss()(dvector_pred, true_dvector)
             loss_dict["dvector"] = dvector_loss

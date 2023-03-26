@@ -196,7 +196,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def forward(self, phones, phone_durations, durations, mel, val_ind, speaker, inference=False):
+    def forward(self, phones, phone_durations, durations, mel, val_ind, speaker, inference=False, return_loss=True):
         loss_dict = {}
 
         norm_mel = self.con.scalers["mel"].transform(mel)
@@ -286,7 +286,6 @@ class FastSpeechWithConsistency(PreTrainedModel):
             true_measure_noise, pred_measure_noise, true_dvector_noise, pred_dvector_noise = self.measures_diffuser(measure_diffuser_input, measures_diff, dvector_diff)
             loss_dict["measure_predictor_diff"] += nn.MSELoss()(pred_measure_noise, true_measure_noise) / self.diffusion_steps_per_forward
             loss_dict["dvector_predictor_diff"] += nn.MSELoss()(pred_dvector_noise, true_dvector_noise) / self.diffusion_steps_per_forward
-            loss_dict["dvector_predictor_diff"] *= 0.1
 
         if inference:
             ### Measure & Dvector Sampling
@@ -354,7 +353,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
             loss_dict["mel_diff"] += nn.MSELoss()(pred_mel_noise, true_mel_noise) / self.diffusion_steps_per_forward
 
         ### Mel Sampling
-        if inference:
+        if inference or True:
             pred_mel_diff, _ = self.mel_sampler(mel_diffuser_input, lco["evaluation"]["num_steps"], batch_size)
             #pred_mel = pred_mel_disc + pred_mel_diff
             pred_mel = pred_mel_diff
@@ -368,6 +367,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
 
         # denormalize mel
         #if inference:
+        
         x = self.con.scalers["mel"].inverse_transform(pred_mel)
         x = x * mask
         results["mel"] = x
@@ -376,6 +376,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
         
         loss = sum(loss_dict.values()) / len(loss_dict) * mask_scale
 
-        results["loss"] = loss
+        if return_loss:
+            results["loss"] = loss
 
         return results

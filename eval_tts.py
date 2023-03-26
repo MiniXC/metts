@@ -50,7 +50,7 @@ dl = DataLoader(
 )
 
 consistency_net = ConformerConsistencyPredictorWithDVector.from_pretrained("pretrained_models/consistency")
-model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-47000", consistency_net=consistency_net)
+model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-3003", consistency_net=consistency_net)
 
 # eval
 model.eval()
@@ -87,20 +87,20 @@ for i, item in tqdm(enumerate(dl), total=len(dl)):
 
     result_inf = result_tf
 
-    mask = result_tf["mask"].squeeze(-1)
-    synth_mel = result_tf["mel"][0][mask[0]][:-1]
-    audio = synth(synth_mel)
-    if len(audio.shape) == 1:
-        audio = torch.tensor(audio).unsqueeze(0)
-    else:
-        audio = torch.tensor(audio)
-    torchaudio.save(f"test_{i}.wav", audio, 22050)
+    # mask = result_tf["mask"].squeeze(-1)
+    # synth_mel = result_tf["mel"][0][mask[0]][:-1]
+    # audio = synth(synth_mel)
+    # if len(audio.shape) == 1:
+    #     audio = torch.tensor(audio).unsqueeze(0)
+    # else:
+    #     audio = torch.tensor(audio)
+    # torchaudio.save(f"test_{i}.wav", audio, 22050)
     
     # # plot ground truth vs predicted (tf) and predicted (inf)
     mel_min, mel_max = torch.min(mel), torch.max(mel)
     plt.figure(figsize=(20, 10))
     plt.subplot(3, 1, 1)
-    plt.imshow(item["mel"][0].T, aspect="auto", origin="lower", vmin=mel_min, vmax=mel_max)
+    plt.imshow(mel.T, aspect="auto", origin="lower", vmin=mel_min, vmax=mel_max)
     plt.title("Ground Truth")
     plt.subplot(3, 1, 2)
     plt.imshow(result_tf["mel"][0].detach().numpy().T, aspect="auto", origin="lower", vmin=mel_min, vmax=mel_max)

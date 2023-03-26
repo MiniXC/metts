@@ -222,22 +222,22 @@ class DiffusionConformer(nn.Module):
 
         self.conditional_in = nn.Sequential(
             nn.Linear(in_channels, 256),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(256, 256),
         )
         self.step_in = nn.Sequential(
             nn.Linear(lco["diffusion"]["step_embed_dim_out"], 256),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(256, 256),
         )
         self.sequence_in = nn.Sequential(
             nn.Linear(sequence_level_outputs, 256),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(256, 256),
         )
         self.x_frame_in = nn.Sequential(
             nn.Linear(frame_level_outputs, 256),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(256, 256),
         )
 
@@ -255,34 +255,35 @@ class DiffusionConformer(nn.Module):
                 batch_first=True,
                 dropout=0.1,
                 conv_depthwise=lco["diffusion"]["depthwise"],
+                activation="gelu",
             ),
             num_layers=layers,
         )
         self.out_layer_frame = nn.Sequential(
             nn.Linear(256, 256),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(256, frame_level_outputs),
         )
 
         if self.sequence_level_outputs > 0:
             self.s_step_in = nn.Sequential(
                 nn.Linear(lco["diffusion"]["step_embed_dim_out"], 256),
-                nn.ReLU(),
+                nn.GELU(),
                 nn.Linear(256, 256),
             )
             self.s_conditional_in = nn.Sequential(
                 nn.Linear(in_channels, 256),
-                nn.ReLU(),
+                nn.GELU(),
                 nn.Linear(256, 256),
             )
             self.s_frame_in = nn.Sequential(
                 nn.Linear(frame_level_outputs, 256),
-                nn.ReLU(),
+                nn.GELU(),
                 nn.Linear(256, 256),
             )
             self.s_sequence_in = nn.Sequential(
                 nn.Linear(sequence_level_outputs, 256),
-                nn.ReLU(),
+                nn.GELU(),
                 nn.Linear(256, 256),
             )
             self.sequence_transformer = TransformerEncoder(
@@ -295,26 +296,29 @@ class DiffusionConformer(nn.Module):
                     batch_first=True,
                     dropout=0.1,
                     conv_depthwise=lco["diffusion"]["depthwise"],
+                    activation="gelu",
                 ),
                 num_layers=layers,
             )
             self.out_layer_sequence = nn.Sequential(
                 nn.Linear(256*2, 256),
-                nn.ReLU(),
+                nn.GELU(),
                 nn.Linear(256, sequence_level_outputs),
             )
 
     def _forward(self, c, step, x_frame, x_sequence=None):
         step_embed = self.step_embed(step)
-        
+
         x = self.x_frame_in(x_frame)
-        x = self.positional_encoding(x)
-        out = self.conformer(x, condition=self.step_in(step_embed).unsqueeze(1) + self.conditional_in(c))
+        x = self.positional_encoding(x) + self.step_in(step_embed).unsqueeze(1) + self.conditional_in(c)
+        x = self.conformer(x, condition=self.step_in(step_embed).unsqueeze(1) + self.conditional_in(c))
+
         frame_out = self.out_layer_frame(x)
 
         if self.sequence_level_outputs > 0:
             sequence_in = self.s_sequence_in(x_sequence)
-            self.positional_encoding(sequence_in)
+            sequence_in = self.positional_encoding(sequence_in) + self.s_frame_in(frame_out) + self.s_step_in(step_embed).unsqueeze(1)
+
             out = self.sequence_transformer(sequence_in, condition=self.s_step_in(step_embed).unsqueeze(1) + self.s_conditional_in(c))
             # use max + avg pooling to get sequence level conditional embedding
             sequence_out = torch.cat(
@@ -324,6 +328,7 @@ class DiffusionConformer(nn.Module):
                 ),
                 1
             )
+            
             sequence_out = self.out_layer_sequence(sequence_out)
         else:
             sequence_out = None
@@ -350,7 +355,7 @@ class DiffusionConformer(nn.Module):
         x_frame = (x_frame * noise_scale) + (z_frame * delta)
         
         if x_sequence is not None:
-            x_sequence = (x_sequence * noise_scale) + (z_sequence * delta)
+            x_sequence = (x_sequence.unsqueeze(1) * noise_scale) + (z_sequence.unsqueeze(1) * delta)
         
         step = step.view(batch_size, 1).to(c.device)
 

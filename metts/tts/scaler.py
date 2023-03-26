@@ -86,7 +86,10 @@ class GaussianMinMaxScaler(nn.Module):
     def transform(self, X):
         X = X - self.min + self.floor
         if self.for_tensors:
-            X = X.clip(min=self.floor.item())
+            try:
+                X = X.clip(min=self.floor.item())
+            except RuntimeError:
+                print("RuntimeError in GaussianMinMaxScaler!")
             if self.sqrt:
                 X = torch.sqrt(X)
             # print if any nan values
