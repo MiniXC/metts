@@ -32,8 +32,9 @@ consistency:
   depthwise: True
   measures: [energy, pitch, srmr, snr]
   dvector_dim: 256
+  num_steps: 3
 evaluation:
-  num_steps: 4
+  num_steps: 200
   num_workers: 12
   save_audio: False
   batch_size: 64

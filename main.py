@@ -28,9 +28,10 @@ class CustomTrainer(Trainer):
                 inputs["return_loss"] = True
                 loss, _, _ = self.prediction_step(model, inputs, prediction_loss_only=True)
                 losses.append(loss)
-            return {
-                "eval_loss": torch.stack(losses).mean().item()
+            log_dict = {
+                "eval/loss": torch.stack(losses).mean().item()
             }
+            self.log(log_dict)
 
 def main(index):
     global trainer, dev_global, collator
@@ -50,7 +51,7 @@ def main(index):
     )
 
     consistency_net = ConformerConsistencyPredictorWithDVector.from_pretrained("pretrained_models/consistency")
-    model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-1001", consistency_net=consistency_net, ignore_mismatched_sizes=True) # (MeTTSConfig(), consistency_net=consistency_net)
+    model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-1000", consistency_net=consistency_net, ignore_mismatched_sizes=True) # (MeTTSConfig(), consistency_net=consistency_net)
 
     trainer = CustomTrainer(
         model,
