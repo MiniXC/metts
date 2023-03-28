@@ -39,4 +39,6 @@ evaluation:
   save_audio: False
   batch_size: 64
 training:
-  diffusion_only: True
+  diffusion_only: False
+  consistency_loss: False
+  disc_warmup_steps: 1000

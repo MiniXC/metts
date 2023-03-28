@@ -50,7 +50,7 @@ dl = DataLoader(
 )
 
 consistency_net = ConformerConsistencyPredictorWithDVector.from_pretrained("pretrained_models/consistency")
-model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-5000", consistency_net=consistency_net)
+model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-16000", consistency_net=consistency_net)
 
 # eval
 model.eval()

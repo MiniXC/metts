@@ -135,9 +135,7 @@ class DiffusionSampler():
             torch.normal(0, 1, size=(batch_size, sequence_length, self.model.frame_level_outputs)).to(device=c.device, dtype=c.dtype),
         ]
         if sequence_length == 1:
-            print(xs[0].shape)
             xs[0] = xs[0].squeeze(1)
-            print(xs[0].shape)
 
         def sampling_loop(length, progress_bar=True):
             if progress_bar:
