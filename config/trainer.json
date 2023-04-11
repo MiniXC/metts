@@ -6,7 +6,7 @@
     "warmup_ratio": 0,
     "report_to": "wandb",
     "max_steps": 75000,
-    "run_name": "disc_warmup",
+    "run_name": "another_try",
     "dataloader_num_workers": 12,
     "remove_unused_columns": false,
     "evaluation_strategy": "steps",

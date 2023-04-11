@@ -15,7 +15,7 @@ from .transformer import TransformerEncoder, PositionalEncoding
 from .conformer_layer import ConformerLayer
 from .length_regulator import LengthRegulator
 # from .diffusion_vocoder import DiffWave, DiffWaveSampler
-from .refinement_models import DiffusionConformer, DiffusionSampler, DiffusionLinear
+from .refinement_models import DiffusionConformer, DiffusionSampler, DiffusionConformerSequence
 from .scaler import GaussianMinMaxScaler
 
 # wasserstein distance
@@ -161,11 +161,9 @@ class FastSpeechWithConsistency(PreTrainedModel):
             in_channels=256,
             frame_level_outputs=4,
         )
-        self.dvector_diffuser = DiffusionLinear(
-            in_dim=256,
-            out_dim=256,
-            hidden_dim=1024,
-            layers=8,
+        self.dvector_diffuser = DiffusionConformerSequence(
+            in_channels=256,
+            frame_level_outputs=256,
         )
         self.measures_dvector_diff = nn.Sequential(
             nn.Linear(512, 256),
@@ -327,17 +325,18 @@ class FastSpeechWithConsistency(PreTrainedModel):
             )
             measure_diffuser_input = F.gelu(measure_diffuser_input)
             measures_diff = (true_measures.transpose(1, 2) - pred_measures_disc.transpose(1, 2)) * mask
-            if self.measures_scaler_diff._n <= 1_000:
+            if self.measures_scaler_diff._n <= 1_000 and self._n >= 100:
                 self.measures_scaler_diff.partial_fit(measures_diff)
             measures_diff = self.measures_scaler_diff.transform(measures_diff)
 
             dvector_diffuser_input = (
-                self.measures_dvector_in(pred_dvector_disc) +
-                speaker
+                x +
+                pred_dvector_disc.unsqueeze(1) +
+                speaker.unsqueeze(1)
             )
-            dvector_diffuser_input = F.gelu(dvector_diffuser_input)
+            #dvector_diffuser_input = F.gelu(dvector_diffuser_input)
             dvector_diff = true_dvector - pred_dvector_disc
-            if self.dvector_scaler_diff._n <= 1_000:
+            if self.dvector_scaler_diff._n <= 1_000 and self._n >= 100:
                 self.dvector_scaler_diff.partial_fit(dvector_diff)
             dvector_diff = self.dvector_scaler_diff.transform(dvector_diff)
             loss_dict["measure_predictor_diff"] = 0.0
@@ -348,7 +347,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
                 true_measure_noise = true_measure_noise * mask
                 pred_measure_noise = pred_measure_noise * mask
                 loss_dict["measure_predictor_diff"] += nn.MSELoss()(pred_measure_noise, true_measure_noise) / self.diffusion_steps_per_forward
-                true_dvector_noise, pred_dvector_noise, _, _ = self.dvector_diffuser(dvector_diffuser_input, dvector_diff)
+                true_dvector_noise, pred_dvector_noise, _, _ = self.dvector_diffuser(dvector_diffuser_input[:, -1, :], dvector_diff)
                 loss_dict["dvector_predictor_diff"] += nn.MSELoss()(pred_dvector_noise.squeeze(1), true_dvector_noise) / self.diffusion_steps_per_forward
 
         if inference:
@@ -421,7 +420,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
             mel_diffuser_input = F.gelu(mel_diffuser_input)
 
             mel_diff = norm_mel - pred_mel_disc
-            if self.mel_scaler_diff._n <= 1_000:
+            if self.mel_scaler_diff._n <= 1_000 and self._n >= 100:
                 self.mel_scaler_diff.partial_fit(mel_diff)
             mel_diff = self.mel_scaler_diff.transform(mel_diff)
             loss_dict["mel_diff"] = 0.0

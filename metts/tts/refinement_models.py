@@ -304,8 +304,8 @@ class DiffusionConformer(nn.Module):
 
         return z_frame, result[0], None, None
 
-class DiffusionLinear(nn.Module):
-    def __init__(self, in_dim, out_dim, layers=4, hidden_dim=1024):
+class DiffusionConformerSequence(nn.Module):
+    def __init__(self, in_channels, frame_level_outputs, layers=2, hidden_dim=256):
         super().__init__()
         noise_schedule = torch.linspace(
             lco["diffusion"]["beta_0"],
@@ -315,56 +315,75 @@ class DiffusionLinear(nn.Module):
         self.diff_params = compute_diffusion_params(noise_schedule)
 
         self.conditional_in = nn.Sequential(
-            nn.Linear(in_dim, hidden_dim),
+            nn.Linear(in_channels, hidden_dim),
             nn.GELU(),
-            nn.Linear(hidden_dim, in_dim),
+            nn.Linear(hidden_dim, hidden_dim),
         )
-        self.conditional_residual = nn.Linear(in_dim, hidden_dim)
         self.step_in = nn.Sequential(
             nn.Linear(lco["diffusion"]["step_embed_dim_out"], hidden_dim),
             nn.GELU(),
-            nn.Linear(hidden_dim, in_dim),
+            nn.Linear(hidden_dim, hidden_dim),
         )
-        self.step_residual = nn.Linear(lco["diffusion"]["step_embed_dim_out"], hidden_dim)
+        self.x_frame_in = nn.Sequential(
+            nn.Linear(frame_level_outputs, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
 
+        self.positional_encoding = PositionalEncoding(hidden_dim)
+        self.frame_level_outputs = frame_level_outputs
         self.step_embed = StepEmbedding()
-        layer_list = []
-        layer_list.append(nn.Linear(in_dim*2, hidden_dim))
-        for i in range(layers-1):
-            layer_list.append(nn.Linear(hidden_dim, hidden_dim))
-        self.layers = nn.ModuleList(layer_list)
-        self.out_layer = nn.Linear(hidden_dim, out_dim)
+        self.conformer = TransformerEncoder(
+            ConformerLayer(
+                hidden_dim,
+                2,
+                conv_in=hidden_dim,
+                conv_filter_size=1024,
+                conv_kernel=(9, 1),
+                batch_first=True,
+                dropout=0.1,
+                conv_depthwise=lco["diffusion"]["depthwise"],
+                activation="gelu",
+            ),
+            num_layers=layers,
+        )
+        self.out_layer_frame = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, frame_level_outputs),
+        )
 
-        self.frame_level_outputs = out_dim
-
-    def _forward(self, c, step, x):
+    def _forward(self, c, step, x_frame):
         step_embed = self.step_embed(step)
 
-        x = torch.cat([x + self.step_in(step_embed).squeeze(1), self.conditional_in(c)], dim=-1)
+        # set [SEQ] token is set to -1, to avoid clashing with padding
+        x_frame[:, -1, :] = -1
+
+        x = self.x_frame_in(x_frame)
+        x = self.positional_encoding(x) + self.step_in(step_embed).unsqueeze(1) + self.conditional_in(c)
         x = F.gelu(x)
-        for layer in self.layers:
-            x = layer(x) + self.step_residual(step_embed).squeeze(1) + self.conditional_residual(c)
-            x = F.gelu(x)
-        x = self.out_layer(x).unsqueeze(1)
+        x = self.conformer(x, condition=self.step_in(step_embed).unsqueeze(1) + self.conditional_in(c))
 
-        return x, None
+        frame_out = self.out_layer_frame(x)
 
-    def forward(self, c, x):
+        return frame_out, None
+
+    def forward(self, c, x_frame):
         c = c#.detach()
-        x = x#.detach()
+        x_frame = x_frame#.detach()
         
-        batch_size = x.shape[0]
+        batch_size = x_frame.shape[0]
         step = torch.randint(low=0, high=self.diff_params["T"], size=(batch_size,1,1))
         
         noise_scale = self.diff_params["alpha"].to(device=c.device, dtype=c.dtype)[step]
         delta = (1 - noise_scale**2).sqrt()
         
-        z = torch.normal(0, 1, size=x.shape).to(device=c.device, dtype=c.dtype)
+        z_frame = torch.normal(0, 1, size=x_frame.shape).to(device=c.device, dtype=c.dtype)
 
-        x = (x * noise_scale.squeeze(1)) + (z * delta.squeeze(1))
+        x_frame = (x_frame * noise_scale) + (z_frame * delta)
         
         step = step.view(batch_size, 1).to(c.device)
 
-        result = self._forward(c, step, x)
+        result = self._forward(c, step, x_frame)
 
-        return z, result[0], None, None
+        return z_frame, result[0], None, None
