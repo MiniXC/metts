@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from metts.utils.tpu_met import MetricsDelta
 
 class GaussianMinMaxScaler(nn.Module):
     """
@@ -31,7 +32,7 @@ class GaussianMinMaxScaler(nn.Module):
             self.register_buffer("expected_max", torch.tensor(expected_max))
             self.register_buffer("floor", torch.tensor(floor))
             self.register_buffer("_n", torch.tensor(_n))
-            self.register_buffer("for_tensors", torch.tensor(for_tensors))
+            self.for_tensors = for_tensors
         else:
             self.max = _max
             self.min = _min
@@ -86,12 +87,12 @@ class GaussianMinMaxScaler(nn.Module):
     def transform(self, X):
         X = X - self.min + self.floor
         if self.for_tensors:
-            X = X.clip(min=self.floor.item())
+            X = X.clamp_(min=self.floor)
             if self.sqrt:
                 X = torch.sqrt(X)
             # print if any nan values
-            if torch.isnan(X).any():
-                print("NAN values in GaussianMinMaxScaler!")
+            # if torch.isnan(X).any():
+            #     print("NAN values in GaussianMinMaxScaler!")
         else:
             X = np.clip(X, a_min=self.floor, a_max=None)
             if self.sqrt:

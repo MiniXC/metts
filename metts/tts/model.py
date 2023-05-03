@@ -15,8 +15,9 @@ from .transformer import TransformerEncoder, PositionalEncoding
 from .conformer_layer import ConformerLayer
 from .length_regulator import LengthRegulator
 # from .diffusion_vocoder import DiffWave, DiffWaveSampler
-from .refinement_models import DiffusionConformer, DiffusionSampler, DiffusionConformerSequence
+from .refinement_models import DiffusionConformer, DiffusionSampler, DiffusionXUnet
 from .scaler import GaussianMinMaxScaler
+from metts.utils.tpu_met import MetricsDelta
 
 # wasserstein distance
 from scipy.stats import wasserstein_distance
@@ -81,7 +82,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
                 dropout=0.1,
                 conv_depthwise=lco["conformer"]["depthwise"],
             ),
-            num_layers=6,
+            num_layers=4,
         )
 
         # durations
@@ -180,10 +181,10 @@ class FastSpeechWithConsistency(PreTrainedModel):
 
         self.dvector_to_encoder = nn.Linear(256, 256)
         # measure quantization
-        nbins = 256
-        self.bins = nn.Parameter(torch.linspace(-5, 5, nbins), requires_grad=False)
+        self.nbins = 256
+        #self.bins = nn.Parameter(torch.linspace(-5, 5, nbins), requires_grad=False)
         for measure in self.con.measures:
-            setattr(self, f"{measure}_embed", nn.Embedding(nbins, 256))
+            setattr(self, f"{measure}_embed", nn.Embedding(self.nbins, 256))
 
         self.decoder = TransformerEncoder(
             ConformerLayer(
@@ -207,10 +208,10 @@ class FastSpeechWithConsistency(PreTrainedModel):
         self.mel_dvector_in = nn.Linear(256, 256)
         self.mel_in = nn.Linear(80, 256)
         self.mel_diffuser_hidden_in = nn.Linear(256, 256)
-        self.mel_diffuser = DiffusionConformer(
-            in_channels=256, # hidden dim + predicted mel
+        self.mel_diffuser = DiffusionXUnet(
+            in_channels=256,
             frame_level_outputs=80,
-            layers=4,
+            hidden_dim=32,
         )
         self.mel_sampler = DiffusionSampler(
             self.mel_diffuser,
@@ -237,7 +238,9 @@ class FastSpeechWithConsistency(PreTrainedModel):
         else:
             steps_per_forward = self.diffusion_steps_per_forward
 
-        if self.duration_scaler._n <= 1_000:
+        if not hasattr(self, "duration_scaler_n"):
+            self.duration_scaler_n = self.duration_scaler._n.item()
+        if self.duration_scaler_n <= 1_000:
             self.duration_scaler.partial_fit(durations)
         norm_durations = self.duration_scaler.transform(durations)
 
@@ -263,7 +266,9 @@ class FastSpeechWithConsistency(PreTrainedModel):
 
         if self._n > self.disc_warmup_steps:
             duration_diff = norm_durations.unsqueeze(-1) - pred_durations_disc.unsqueeze(-1)
-            if self.duration_scaler_diff._n <= 1_000:
+            if not hasattr(self, "duration_scaler_diff_n"):
+                self.duration_scaler_diff_n = self.duration_scaler_diff._n.item()
+            if self.duration_scaler_diff_n <= 1_000:
                 self.duration_scaler_diff.partial_fit(duration_diff)
             duration_diff = self.duration_scaler_diff.transform(duration_diff)
             loss_dict["duration_predictor_diff"] = 0.0
@@ -278,7 +283,9 @@ class FastSpeechWithConsistency(PreTrainedModel):
                 lco["evaluation"]["num_steps"],
                 batch_size
             )
-            pred_durations = pred_duration_diff.squeeze(-1)
+            pred_duration_diff = pred_duration_diff.squeeze(-1)
+            pred_duration_diff = self.duration_scaler.inverse_transform(pred_duration_diff)
+            pred_durations = pred_durations_disc# + pred_duration_diff
             pred_durations = self.duration_scaler.inverse_transform(pred_durations)
             pred_durations = torch.round(pred_durations).long()
 
@@ -297,7 +304,9 @@ class FastSpeechWithConsistency(PreTrainedModel):
         true_measures = consistency_result["logits"]
         true_dvector = consistency_result["logits_dvector"]
 
-        if self.dvector_scaler._n <= 1_000:
+        if not hasattr(self, "dvector_scaler_n"):
+            self.dvector_scaler_n = self.dvector_scaler._n.item()
+        if self.dvector_scaler_n <= 1_000:
             self.dvector_scaler.partial_fit(true_dvector)
         true_dvector = self.dvector_scaler.transform(true_dvector)
 
@@ -324,7 +333,9 @@ class FastSpeechWithConsistency(PreTrainedModel):
             )
             measure_diffuser_input = F.gelu(measure_diffuser_input)
             measures_diff = (true_measures.transpose(1, 2) - pred_measures_disc.transpose(1, 2)) * mask
-            if self.measures_scaler_diff._n <= 1_000 and self._n >= 100:
+            if not hasattr(self, "measures_scaler_diff_n"):
+                self.measures_scaler_diff_n = self.measures_scaler_diff._n.item()
+            if self.measures_scaler_diff_n <= 1_000 and self._n >= 100:
                 self.measures_scaler_diff.partial_fit(measures_diff)
             measures_diff = self.measures_scaler_diff.transform(measures_diff)
 
@@ -362,9 +373,8 @@ class FastSpeechWithConsistency(PreTrainedModel):
                 dvector_diffuser_input,
                 lco["evaluation"]["num_steps"],
                 batch_size,
-                single_element=True,
             )
-            pred_dvector = pred_dvector_diff.squeeze(1)
+            pred_dvector = pred_dvector_diff[:, :256, :].squeeze(-1)
 
             ### Add Dvector to Decoder
             dvector_input = self.dvector_to_encoder(pred_dvector)
@@ -372,7 +382,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
             ### Add Measures to Decoder
             for i, measures in enumerate(self.con.measures):
                 measure_input = getattr(self, f"{measures}_embed")(
-                    torch.bucketize(pred_measures[:, i], self.bins)
+                    (((pred_measures[:, i] / 10) + 0.5) * self.nbins).long() # since bucketize is not lowered to xla
                 )
                 x = x + measure_input
         else:
@@ -382,7 +392,7 @@ class FastSpeechWithConsistency(PreTrainedModel):
             ### Add Measures to Decoder
             for i, measures in enumerate(self.con.measures):
                 measure_input = getattr(self, f"{measures}_embed")(
-                    torch.bucketize(true_measures[:, i], self.bins)
+                    (((true_measures[:, i] / 10) + 0.5) * self.nbins).long()
                 )
                 x = x + measure_input
 
@@ -416,7 +426,9 @@ class FastSpeechWithConsistency(PreTrainedModel):
             mel_diffuser_input = F.gelu(mel_diffuser_input)
 
             mel_diff = norm_mel - pred_mel_disc
-            if self.mel_scaler_diff._n <= 1_000 and self._n >= 100:
+            if not hasattr(self, "mel_scaler_diff_n"):
+                self.mel_scaler_diff_n = self.mel_scaler_diff._n.item()
+            if self.mel_scaler_diff_n <= 1_000 and self._n >= 100:
                 self.mel_scaler_diff.partial_fit(mel_diff)
             mel_diff = self.mel_scaler_diff.transform(mel_diff)
             loss_dict["mel_diff"] = 0.0
@@ -432,8 +444,6 @@ class FastSpeechWithConsistency(PreTrainedModel):
             pred_mel_diff = self.mel_scaler_diff.inverse_transform(pred_mel_diff)
             pred_mel = pred_mel_disc + pred_mel_diff
         else:
-            # pred_mel_diff, _ = self.mel_sampler(mel_diffuser_input, lco["evaluation"]["num_steps"], batch_size)
-            # pred_mel = pred_mel_diff
             pred_mel = pred_mel_disc
 
         results = {

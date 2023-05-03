@@ -9,6 +9,8 @@ from matplotlib import pyplot as plt
 import lco
 import numpy as np
 
+import metts.tts.refinement_models
+
 from metts.dataset.data_collator import MeTTSCollator, FastSpeechWithConsistencyCollator
 from metts.dataset.measure import PitchMeasure, EnergyMeasure, SRMRMeasure, SNRMeasure
 from metts.dataset.plotting import plot_batch, plot_batch_meta
@@ -18,6 +20,7 @@ from metts.tts.scaler import GaussianMinMaxScaler
 if __name__ == "__main__":
     lco.init("config/config.yaml")
     dataset = load_dataset("metts/dataset/dataset.py", "libritts")
+    print(dataset.ds.info())
     dev_ds = dataset["train"]
     speaker2idx = json.load(open("data/speaker2idx.json"))
     phone2idx = json.load(open("data/phone2idx.json"))

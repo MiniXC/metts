@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import lco
 import numpy as np
 from tqdm.auto import tqdm
+from x_unet import XUnet
 
 from .transformer import TransformerEncoder, PositionalEncoding
 from .conformer_layer import ConformerLayer
@@ -258,7 +259,7 @@ class DiffusionConformer(nn.Module):
                 2,
                 conv_in=hidden_dim,
                 conv_filter_size=1024,
-                conv_kernel=(9, 1),
+                conv_kernel=(3, 1),
                 batch_first=True,
                 dropout=0.1,
                 conv_depthwise=lco["diffusion"]["depthwise"],
@@ -285,8 +286,8 @@ class DiffusionConformer(nn.Module):
         return frame_out, None
 
     def forward(self, c, x_frame):
-        c = c#.detach()
-        x_frame = x_frame#.detach()
+        c = c.detach()
+        x_frame = x_frame.detach()
         
         batch_size = x_frame.shape[0]
         step = torch.randint(low=0, high=self.diff_params["T"], size=(batch_size,1,1))
@@ -304,8 +305,9 @@ class DiffusionConformer(nn.Module):
 
         return z_frame, result[0], None, None
 
-class DiffusionConformerSequence(nn.Module):
-    def __init__(self, in_channels, frame_level_outputs, layers=2, hidden_dim=256):
+class DiffusionXUnet(nn.Module):
+
+    def __init__(self, in_channels, frame_level_outputs, hidden_dim=64):
         super().__init__()
         noise_schedule = torch.linspace(
             lco["diffusion"]["beta_0"],
@@ -330,22 +332,17 @@ class DiffusionConformerSequence(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
         )
 
-        self.positional_encoding = PositionalEncoding(hidden_dim)
         self.frame_level_outputs = frame_level_outputs
         self.step_embed = StepEmbedding()
-        self.conformer = TransformerEncoder(
-            ConformerLayer(
-                hidden_dim,
-                2,
-                conv_in=hidden_dim,
-                conv_filter_size=1024,
-                conv_kernel=(9, 1),
-                batch_first=True,
-                dropout=0.1,
-                conv_depthwise=lco["diffusion"]["depthwise"],
-                activation="gelu",
-            ),
-            num_layers=layers,
+        self.xunet = XUnet(
+            dim=hidden_dim,
+            channels=1,
+            consolidate_upsample_fmaps=False,
+            use_convnext=False,
+            dim_mults=(1,4,8),
+            num_blocks_per_stage=(2,2,2),
+            num_self_attn_per_stage=(0,0,1),
+            nested_unet_depths=(0,0,0),
         )
         self.out_layer_frame = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
@@ -355,22 +352,20 @@ class DiffusionConformerSequence(nn.Module):
 
     def _forward(self, c, step, x_frame):
         step_embed = self.step_embed(step)
-
-        # set [SEQ] token is set to -1, to avoid clashing with padding
-        x_frame[:, -1, :] = -1
-
+        
         x = self.x_frame_in(x_frame)
-        x = self.positional_encoding(x) + self.step_in(step_embed).unsqueeze(1) + self.conditional_in(c)
+        x = self.step_in(step_embed).unsqueeze(1) + self.conditional_in(c) + x
         x = F.gelu(x)
-        x = self.conformer(x, condition=self.step_in(step_embed).unsqueeze(1) + self.conditional_in(c))
+        x = x.unsqueeze(1)
+        x = self.xunet(x)
+        x = self.out_layer_frame(x)
+        x = x.squeeze(1)
 
-        frame_out = self.out_layer_frame(x)
-
-        return frame_out, None
+        return x, None
 
     def forward(self, c, x_frame):
-        c = c#.detach()
-        x_frame = x_frame#.detach()
+        c = c.detach()
+        x_frame = x_frame.detach()
         
         batch_size = x_frame.shape[0]
         step = torch.randint(low=0, high=self.diff_params["T"], size=(batch_size,1,1))

@@ -34,11 +34,11 @@ consistency:
   dvector_dim: 256
   num_steps: 3
 evaluation:
-  num_steps: 200
+  num_steps: 4
   num_workers: 12
   save_audio: False
   batch_size: 64
 training:
   diffusion_only: False
   consistency_loss: False
-  disc_warmup_steps: 1000
+  disc_warmup_steps: 0

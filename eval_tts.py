@@ -50,7 +50,7 @@ dl = DataLoader(
 )
 
 consistency_net = ConformerConsistencyPredictorWithDVector.from_pretrained("pretrained_models/consistency")
-model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-16000", consistency_net=consistency_net)
+model = FastSpeechWithConsistency.from_pretrained("output/checkpoint-55000", consistency_net=consistency_net)
 
 # eval
 model.eval()
@@ -88,8 +88,8 @@ for i, item in tqdm(enumerate(dl), total=len(dl)):
 
     #result_inf = result_tf
 
-    mask = result_tf["mask"].squeeze(-1)
-    synth_mel = result_tf["mel"][0][mask[0]][:-1]
+    mask = result_inf["mask"].squeeze(-1)
+    synth_mel = result_inf["mel"][0][mask[0]][:-1]
     audio = synth(synth_mel)
     if len(audio.shape) == 1:
         audio = torch.tensor(audio).unsqueeze(0)
